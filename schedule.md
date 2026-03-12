@@ -64,6 +64,7 @@ Give at bedtime on these nights:
 |---|---|---|---|
 | **Cerenia (Maropitant) 16mg** | 1 tablet | If vomiting | Once every 24 hours |
 | **Ondansetron 4mg** | 1/2 tablet | If nauseous (not eating, drooling, lip-licking) | Every 8 hours |
+| **Sub-Q Fluids (LRS)** | 100 mL subcutaneous | If dehydrated (skin tenting, dry gums, low urine) | Every other day |
 
 ---
 

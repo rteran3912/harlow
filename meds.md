@@ -19,6 +19,15 @@
 - **Schedule:** 3/14, 3/16, 3/18, 3/20, 3/22, 3/24 (until directed otherwise)
 - **Note:** She also received Dex SP at CARE on 3/10
 
+### Subcutaneous Fluids (Lactated Ringer's Solution / LRS)
+- **Dose:** 100 mL subcutaneous
+- **Frequency:** Every other day, AS NEEDED for rehydration
+- **Purpose:** Rehydration support (IBD/AHDS fluid loss)
+- **Prescribed by:** Dr. Christian L. Eriksson de Rezende, DVM, MS, DACVIM — Skyline (3/12)
+- **RX#:** 46178 | Qty: 1000 mL bag with line and needles
+- **Expiration:** 9/12/2026
+- **Note:** Give subcutaneously between shoulder blades. Monitor for fluid pocket absorption. Only give if showing signs of dehydration (skin tenting, dry gums, lethargy, reduced urine output).
+
 ### Vitamin B-12 Injection
 - **Dose:** 0.4 mL (1 prefilled syringe) subcutaneous injection
 - **Frequency:** Once weekly
