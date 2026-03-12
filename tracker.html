@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Harlow">
+<title>Harlow's Care Tracker</title>
+<style>
+  :root {
+    --bg: #FAFAF8;
+    --card: #FFFFFF;
+    --border: #E0DDD8;
+    --text: #1A1A1A;
+    --muted: #6B6560;
+    --accent: #4A7C6F;
+    --accent-light: #E8F0ED;
+    --warning: #C4553A;
+    --warning-light: #FDEEED;
+    --injection: #5B6ABF;
+    --injection-light: #EDEFFA;
+    --prn: #8B7355;
+    --prn-light: #F5F0E8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 16px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  header {
+    text-align: center;
+    padding: 20px 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 20px;
+  }
+
+  header h1 { font-size: 24px; font-weight: 700; }
+  header .subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+  .alert {
+    background: var(--warning-light);
+    border: 1px solid var(--warning);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .alert strong { color: var(--warning); }
+
+  .nav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .nav button {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+    transition: all 0.15s;
+  }
+
+  .nav button:hover { border-color: var(--accent); }
+  .nav button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .nav button.has-data {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .nav button.injection-day::after {
+    content: ' 💉';
+  }
+
+  .section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .section h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    margin: 14px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .med-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    font-size: 14px;
+    transition: background 0.15s;
+  }
+
+  .med-row:hover { background: #F5F4F2; }
+  .med-row.checked { opacity: 0.5; text-decoration: line-through; }
+  .med-row .time { width: 70px; font-weight: 600; flex-shrink: 0; font-size: 13px; color: var(--muted); }
+  .med-row .name { flex: 1; font-weight: 500; }
+  .med-row .dose { color: var(--muted); font-size: 13px; flex-shrink: 0; }
+  .med-row .note { font-size: 12px; color: var(--accent); font-style: italic; }
+
+  .med-row.injection { background: var(--injection-light); }
+  .med-row.injection .name { color: var(--injection); }
+  .med-row.prn { background: var(--prn-light); }
+  .med-row.prn .name { color: var(--prn); }
+  .med-row.eye { background: #F0F5F2; }
+  .med-row.eye .name { color: #4A7C6F; }
+
+  .med-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  /* Log sections */
+  .log-entries { margin-bottom: 12px; }
+
+  .log-entry {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+
+  .log-entry .fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .log-entry label { font-weight: 500; font-size: 12px; color: var(--muted); }
+
+  .log-entry input, .log-entry select, .log-entry textarea {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg);
+  }
+
+  .log-entry input[type="time"] { width: 100px; }
+  .log-entry select { min-width: 80px; }
+  .log-entry textarea { width: 100%; min-height: 40px; resize: vertical; }
+
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+
+  .add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .remove-btn {
+    background: none;
+    border: none;
+    color: var(--warning);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .remove-btn:hover { background: var(--warning-light); }
+
+  /* Symptoms */
+  .symptom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .symptom-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .symptom-item label { font-size: 13px; font-weight: 500; }
+
+  .symptom-item .range-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .symptom-item input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .symptom-item .range-val {
+    font-weight: 600;
+    font-size: 14px;
+    min-width: 20px;
+    text-align: center;
+  }
+
+  .symptom-item input[type="number"] {
+    width: 60px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 14px;
+    background: var(--bg);
+  }
+
+  .notes-area {
+    width: 100%;
+    min-height: 60px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    background: var(--bg);
+  }
+
+  .summary-bar {
+    display: flex;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--accent-light);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+
+  .summary-bar .stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .summary-bar .stat strong { color: var(--accent); }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    justify-content: flex-end;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+
+  .btn:hover { border-color: var(--accent); }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-danger { color: var(--warning); }
+  .btn-danger:hover { background: var(--warning-light); border-color: var(--warning); }
+
+  .photo-capture { margin-top: 6px; }
+  .photo-capture input[type="file"] { display: none; }
+  .photo-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .photo-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .photo-grid {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .photo-thumb {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .photo-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+  }
+  .photo-thumb .remove-photo {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .photo-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+  }
+  .photo-modal.active { display: flex; }
+  .photo-modal img {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  @media print {
+    .nav, .add-btn, .remove-btn, .actions, .btn { display: none !important; }
+    body { padding: 0; max-width: 100%; }
+    .section { break-inside: avoid; border: 1px solid #ccc; }
+    .med-row.checked { opacity: 1; text-decoration: none; }
+    .med-row.checked::after { content: ' ✓'; color: green; }
+  }
+
+  @media (max-width: 600px) {
+    .symptom-grid { grid-template-columns: 1fr; }
+    .log-entry { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Harlow's Care Tracker</h1>
+  <div class="subtitle">Harlow Teran | 10.5 YO Wire Fox Terrier | DOB 07/01/2015 | 6.1 kg</div>
+  <div class="subtitle">IBD/AHDS Recovery — March 12–25, 2026</div>
+</header>
+
+<div class="alert">
+  <strong>B-12 Expiration Flag:</strong> Label says exp. 2/28/2026. Confirm with Skyline Veterinary Specialists before using. Call: (704) 672-5590
+</div>
+
+<div class="alert" style="background:#FFF8E1;border-color:#F9A825;">
+  <strong style="color:#F57F17;">Medication Rules:</strong><br>
+  <strong>Metronidazole</strong> — give WITH food &nbsp;|&nbsp; <strong>Metoclopramide</strong> — give 30min BEFORE food &nbsp;|&nbsp; <strong>Cerenia</strong> — give with small amount of food<br>
+  <strong>Proviable probiotic</strong> — separate from Metronidazole by 1-2 hours (antibiotic kills probiotic)<br>
+  <strong>DO NOT</strong> give Metoclopramide + Ondansetron at the same time (serotonin overlap)<br>
+  <strong>Eye drops:</strong> wait 5 min between each drop in the same eye. Order: Dorzolamide → Bromfenac → Neopolydex → Difluprednate
+</div>
+
+<div class="alert" style="background:#EDEFFA;border-color:#5B6ABF;">
+  <strong style="color:#5B6ABF;">Steroid Load Alert:</strong> Harlow is on 3 corticosteroids (Dex SP injection + Neopolydex eye + Difluprednate eye). Confirm vet is aware of all three sources.
+</div>
+
+<div class="nav" id="dayNav"></div>
+
+<div class="summary-bar" id="summaryBar"></div>
+
+<div id="dayContent"></div>
+
+<div class="actions">
+  <button class="btn btn-danger" onclick="clearDay()">Clear Today's Data</button>
+  <button class="btn" onclick="exportData()">Export All Data (JSON)</button>
+  <button class="btn btn-primary" onclick="window.print()">Print for Vet</button>
+</div>
+
+<script>
+const START = new Date(2026, 2, 12); // March 12, 2026
+const DAYS = 14;
+let currentDay = 0;
+
+// Medication schedule template
+const DAILY_MEDS = [
+  { time: '06:00', name: 'Metoclopramide', dose: '1/4 tab (1.25mg)', note: 'Prokinetic — 30 min before breakfast', type: 'scheduled' },
+  { time: '06:00', name: 'Metronidazole', dose: '1/4 tab (62.5mg)', note: 'Antibiotic — give WITH food', type: 'scheduled' },
+  { time: '~06:30', name: 'Breakfast', dose: 'Small amount, special diet', note: '', type: 'meal' },
+  { time: '08:00', name: 'Optix Care', dose: 'Eye lubricant — both eyes', note: '', type: 'eye' },
+  { time: '08:00', name: 'Dorzolamide AM', dose: 'Eye drops — RIGHT EYE ONLY', note: '', type: 'eye' },
+  { time: '08:00', name: 'Neomycin (Neopolydex) AM', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
+  { time: '14:00', name: 'Metoclopramide', dose: '1/4 tab (1.25mg)', note: 'Prokinetic — every 8hrs', type: 'scheduled' },
+  { time: '14:00', name: 'Probiotic Capsule', dose: '1 capsule', note: 'Daily through ~3/22', type: 'scheduled', endDay: 10 },
+  { time: '18:00', name: 'Metronidazole', dose: '1/4 tab (62.5mg)', note: 'Antibiotic — give WITH food', type: 'scheduled' },
+  { time: '~18:30', name: 'Dinner', dose: 'Small amount, special diet', note: '', type: 'meal' },
+  { time: '20:00', name: 'Dorzolamide PM', dose: 'Eye drops — BOTH EYES', note: '', type: 'eye' },
+  { time: '20:00', name: 'Neomycin (Neopolydex) PM', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
+  { time: '20:00', name: 'Optix Care PM', dose: 'Eye lubricant — both eyes', note: 'After evening eye meds', type: 'eye' },
+  { time: '22:00', name: 'Metoclopramide', dose: '1/4 tab (1.25mg)', note: 'Prokinetic — every 8hrs', type: 'scheduled' },
+];
+
+// Every-other-night eye meds (same nights as Dex SP: even day indexes = 0, 2, 4, 6, 8, 10, 12)
+const EVERY_OTHER_NIGHT_EYE_DAYS = [0, 2, 4, 6, 8, 10, 12]; // 3/12, 3/14, 3/16, ...
+const EVERY_OTHER_NIGHT_EYE_MEDS = [
+  { time: 'PM', name: 'Bromfenac Sodium', dose: 'Eye drops — every other night', note: '', type: 'eye' },
+  { time: 'PM', name: 'Difluprednate Ophthalmic', dose: 'Eye drops — every other night', note: '', type: 'eye' },
+];
+
+const PRN_MEDS = [
+  { time: 'PRN', name: 'Cerenia (Maropitant)', dose: '1 tab (16mg)', note: 'Only if vomiting — max 1x/24hrs', type: 'prn' },
+  { time: 'PRN', name: 'Ondansetron', dose: '1/2 tab (2mg)', note: 'Only if nauseous — max every 8hrs', type: 'prn' },
+];
+
+// Injection schedule: day index (0-based) -> injections
+const DEX_DAYS = [2, 4, 6, 8, 10, 12]; // 3/14, 3/16, 3/18, 3/20, 3/22, 3/24
+const B12_DAYS = [5, 12]; // 3/17, 3/24
+
+function getMedsForDay(dayIdx) {
+  let meds = DAILY_MEDS.filter(m => !m.endDay || dayIdx < m.endDay);
+  if (EVERY_OTHER_NIGHT_EYE_DAYS.includes(dayIdx)) {
+    meds.push(...EVERY_OTHER_NIGHT_EYE_MEDS);
+  }
+  if (DEX_DAYS.includes(dayIdx)) {
+    meds.push({ time: 'ANY', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: 'Every other day', type: 'injection' });
+  }
+  if (B12_DAYS.includes(dayIdx)) {
+    meds.push({ time: 'ANY', name: 'B-12 Injection', dose: '0.4 mL subcutaneous', note: 'Weekly', type: 'injection' });
+  }
+  meds.push(...PRN_MEDS);
+  return meds;
+}
+
+function getDayDate(dayIdx) {
+  const d = new Date(START);
+  d.setDate(d.getDate() + dayIdx);
+  return d;
+}
+
+function formatDate(d) {
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+function shortDate(d) {
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+// localStorage
+function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
+
+function loadDay(dayIdx) {
+  const raw = localStorage.getItem(getKey(dayIdx));
+  if (raw) return JSON.parse(raw);
+  return { meds: {}, bms: [], meals: [], urinations: [], symptoms: { energy: 3, vomiting: 0, pain: '', water: 'normal' }, notes: '' };
+}
+
+function saveDay(dayIdx, data) {
+  localStorage.setItem(getKey(dayIdx), JSON.stringify(data));
+}
+
+function dayHasData(dayIdx) {
+  return localStorage.getItem(getKey(dayIdx)) !== null;
+}
+
+// Render navigation
+function renderNav() {
+  const nav = document.getElementById('dayNav');
+  nav.innerHTML = '';
+  for (let i = 0; i < DAYS; i++) {
+    const d = getDayDate(i);
+    const btn = document.createElement('button');
+    const isInjection = DEX_DAYS.includes(i) || B12_DAYS.includes(i);
+    btn.textContent = `Day ${i+1} (${shortDate(d)})`;
+    if (i === currentDay) btn.classList.add('active');
+    if (dayHasData(i) && i !== currentDay) btn.classList.add('has-data');
+    if (isInjection) btn.classList.add('injection-day');
+    btn.onclick = () => { currentDay = i; render(); };
+    nav.appendChild(btn);
+  }
+}
+
+// Render summary bar
+function renderSummary() {
+  const data = loadDay(currentDay);
+  const meds = getMedsForDay(currentDay);
+  const scheduledMeds = meds.filter(m => m.type === 'scheduled' || m.type === 'injection' || m.type === 'eye');
+  const checkedCount = scheduledMeds.filter((m, idx) => data.meds[`${m.type}_${m.name}_${m.time}`]).length;
+  const bar = document.getElementById('summaryBar');
+  bar.innerHTML = `
+    <span class="stat">Meds: <strong>${checkedCount}/${scheduledMeds.length}</strong></span>
+    <span class="stat">BMs logged: <strong>${data.bms.length}</strong></span>
+    <span class="stat">Meals logged: <strong>${data.meals.length}</strong></span>
+    <span class="stat">Energy: <strong>${data.symptoms.energy}/5</strong></span>
+    <span class="stat">Urine: <strong>${(data.urinations||[]).length}</strong></span>
+    <span class="stat">Vomiting: <strong>${data.symptoms.vomiting}</strong></span>
+  `;
+}
+
+// Main render
+function render() {
+  renderNav();
+  renderSummary();
+  const container = document.getElementById('dayContent');
+  const dayIdx = currentDay;
+  const d = getDayDate(dayIdx);
+  const data = loadDay(dayIdx);
+  const meds = getMedsForDay(dayIdx);
+
+  let labels = [];
+  if (DEX_DAYS.includes(dayIdx)) labels.push('DEX SP INJECTION');
+  if (B12_DAYS.includes(dayIdx)) labels.push('B-12 INJECTION');
+  if (dayIdx <= 4) labels.push('Activity restricted');
+  if (dayIdx === 9) labels.push('Last probiotic day');
+
+  let html = `
+    <div class="section">
+      <h2>Day ${dayIdx + 1} — ${formatDate(d)} ${labels.length ? '<span style="font-size:12px;color:var(--warning);">(' + labels.join(' | ') + ')</span>' : ''}</h2>
+      <h3>Medications</h3>
+  `;
+
+  // Group meds by type for display order
+  const scheduled = meds.filter(m => m.type === 'scheduled' || m.type === 'meal');
+  const eyeMeds = meds.filter(m => m.type === 'eye');
+  const injections = meds.filter(m => m.type === 'injection');
+  const prn = meds.filter(m => m.type === 'prn');
+
+  function medRow(m) {
+    const key = `${m.type}_${m.name}_${m.time}`;
+    const checked = data.meds[key] || false;
+    const cls = m.type === 'injection' ? 'injection' : m.type === 'prn' ? 'prn' : m.type === 'meal' ? '' : '';
+    return `
+      <div class="med-row ${cls} ${checked ? 'checked' : ''}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleMed(${dayIdx}, '${key}', this.checked)">
+        <span class="time">${m.time}</span>
+        <span class="name">${m.name}</span>
+        <span class="dose">${m.dose}</span>
+        ${m.note ? `<span class="note">${m.note}</span>` : ''}
+      </div>
+    `;
+  }
+
+  scheduled.forEach(m => html += medRow(m));
+  if (eyeMeds.length) {
+    html += '<h3 style="margin-top:10px;">Eye Medications</h3>';
+    eyeMeds.forEach(m => html += medRow(m));
+  }
+  if (injections.length) {
+    html += '<h3 style="margin-top:10px;">Injections</h3>';
+    injections.forEach(m => html += medRow(m));
+  }
+  html += '<h3 style="margin-top:10px;">As Needed</h3>';
+  prn.forEach(m => html += medRow(m));
+
+  html += '</div>';
+
+  // Bowel Movements
+  html += `
+    <div class="section">
+      <h2>Bowel Movements</h2>
+      <div class="log-entries" id="bmEntries">
+  `;
+
+  data.bms.forEach((bm, i) => {
+    html += bmEntryHTML(dayIdx, i, bm);
+  });
+
+  html += `
+      </div>
+      <button class="add-btn" onclick="addBM(${dayIdx})">+ Add BM entry</button>
+    </div>
+  `;
+
+  // Meals
+  html += `
+    <div class="section">
+      <h2>Meals</h2>
+      <div class="log-entries" id="mealEntries">
+  `;
+
+  data.meals.forEach((meal, i) => {
+    html += mealEntryHTML(dayIdx, i, meal);
+  });
+
+  html += `
+      </div>
+      <button class="add-btn" onclick="addMeal(${dayIdx})">+ Add meal entry</button>
+    </div>
+  `;
+
+  // Urination
+  if (!data.urinations) data.urinations = [];
+  html += `
+    <div class="section">
+      <h2>Urination</h2>
+      <div class="log-entries" id="urineEntries">
+  `;
+
+  data.urinations.forEach((u, i) => {
+    html += urineEntryHTML(dayIdx, i, u);
+  });
+
+  html += `
+      </div>
+      <button class="add-btn" onclick="addUrine(${dayIdx})">+ Add urine entry</button>
+    </div>
+  `;
+
+  // Symptoms
+  html += `
+    <div class="section">
+      <h2>Symptoms</h2>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:13px;font-weight:500;">Time observed:</label>
+        <input type="time" value="${data.symptoms.observedTime || ''}" onchange="updateSymptom(${dayIdx}, 'observedTime', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;background:var(--bg);">
+      </div>
+      <div class="symptom-grid">
+        <div class="symptom-item">
+          <label>Energy Level</label>
+          <div class="range-row">
+            <span style="font-size:12px;color:var(--muted);">Lethargic</span>
+            <input type="range" min="1" max="5" value="${data.symptoms.energy}" oninput="updateSymptom(${dayIdx}, 'energy', this.value); this.nextElementSibling.textContent=this.value">
+            <span class="range-val">${data.symptoms.energy}</span>
+            <span style="font-size:12px;color:var(--muted);">Normal</span>
+          </div>
+        </div>
+        <div class="symptom-item">
+          <label>Vomiting Episodes</label>
+          <input type="number" min="0" value="${data.symptoms.vomiting}" onchange="updateSymptom(${dayIdx}, 'vomiting', this.value)">
+        </div>
+        <div class="symptom-item">
+          <label>Pain Signs</label>
+          <select onchange="updateSymptom(${dayIdx}, 'pain', this.value)">
+            <option value="" ${data.symptoms.pain === '' ? 'selected' : ''}>None observed</option>
+            <option value="mild" ${data.symptoms.pain === 'mild' ? 'selected' : ''}>Mild (restless, lip-licking)</option>
+            <option value="moderate" ${data.symptoms.pain === 'moderate' ? 'selected' : ''}>Moderate (hunching, guarding)</option>
+            <option value="severe" ${data.symptoms.pain === 'severe' ? 'selected' : ''}>Severe (whimpering, won't move)</option>
+          </select>
+        </div>
+        <div class="symptom-item">
+          <label>Water Intake</label>
+          <select onchange="updateSymptom(${dayIdx}, 'water', this.value)">
+            <option value="none" ${data.symptoms.water === 'none' ? 'selected' : ''}>None</option>
+            <option value="low" ${data.symptoms.water === 'low' ? 'selected' : ''}>Low</option>
+            <option value="normal" ${data.symptoms.water === 'normal' ? 'selected' : ''}>Normal</option>
+            <option value="high" ${data.symptoms.water === 'high' ? 'selected' : ''}>High (excessive)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Notes
+  html += `
+    <div class="section">
+      <h2>Notes</h2>
+      <textarea class="notes-area" placeholder="Anything unusual, vet communications, observations..." onchange="updateNotes(${dayIdx}, this.value)">${data.notes}</textarea>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+function bmEntryHTML(dayIdx, i, bm) {
+  return `
+    <div class="log-entry">
+      <div class="field-group">
+        <label>Time</label>
+        <input type="time" value="${bm.time || ''}" onchange="updateBM(${dayIdx}, ${i}, 'time', this.value)">
+      </div>
+      <div class="fields">
+        <div class="field-group">
+          <label>Consistency</label>
+          <select onchange="updateBM(${dayIdx}, ${i}, 'consistency', this.value)">
+            <option value="" ${!bm.consistency ? 'selected' : ''}>--</option>
+            <option value="1" ${bm.consistency==='1' ? 'selected' : ''}>1 - Hard lumps</option>
+            <option value="2" ${bm.consistency==='2' ? 'selected' : ''}>2 - Lumpy/sausage</option>
+            <option value="3" ${bm.consistency==='3' ? 'selected' : ''}>3 - Cracked sausage</option>
+            <option value="4" ${bm.consistency==='4' ? 'selected' : ''}>4 - Smooth/soft</option>
+            <option value="5" ${bm.consistency==='5' ? 'selected' : ''}>5 - Soft blobs</option>
+            <option value="6" ${bm.consistency==='6' ? 'selected' : ''}>6 - Mushy/fluffy</option>
+            <option value="7" ${bm.consistency==='7' ? 'selected' : ''}>7 - Liquid</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Color</label>
+          <select onchange="updateBM(${dayIdx}, ${i}, 'color', this.value)">
+            <option value="" ${!bm.color ? 'selected' : ''}>--</option>
+            <option value="brown" ${bm.color==='brown' ? 'selected' : ''}>Brown (normal)</option>
+            <option value="dark-brown" ${bm.color==='dark-brown' ? 'selected' : ''}>Dark brown</option>
+            <option value="black" ${bm.color==='black' ? 'selected' : ''}>Black (tarry)</option>
+            <option value="red" ${bm.color==='red' ? 'selected' : ''}>Red/bloody</option>
+            <option value="orange" ${bm.color==='orange' ? 'selected' : ''}>Orange</option>
+            <option value="yellow" ${bm.color==='yellow' ? 'selected' : ''}>Yellow</option>
+            <option value="green" ${bm.color==='green' ? 'selected' : ''}>Green</option>
+            <option value="mucus" ${bm.color==='mucus' ? 'selected' : ''}>Mucus-covered</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Blood?</label>
+          <select onchange="updateBM(${dayIdx}, ${i}, 'blood', this.value)">
+            <option value="no" ${bm.blood!=='yes' ? 'selected' : ''}>No</option>
+            <option value="yes" ${bm.blood==='yes' ? 'selected' : ''}>Yes</option>
+          </select>
+        </div>
+        <button class="remove-btn" onclick="removeBM(${dayIdx}, ${i})" title="Remove">×</button>
+      </div>
+      <div style="grid-column:1/-1;">
+        <textarea style="width:100%;min-height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg);" placeholder="Notes..." onchange="updateBM(${dayIdx}, ${i}, 'notes', this.value)">${bm.notes || ''}</textarea>
+      </div>
+      <div style="grid-column:1/-1;" class="photo-capture">
+        <label class="photo-btn" for="bm-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
+        <input type="file" id="bm-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'bm', ${i}, this)">
+        <div class="photo-grid">
+          ${(bm.photos || []).map((p, pi) => `
+            <div class="photo-thumb">
+              <img src="${p}" onclick="showPhoto(this.src)" alt="BM photo">
+              <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'bm', ${i}, ${pi})">×</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function mealEntryHTML(dayIdx, i, meal) {
+  return `
+    <div class="log-entry">
+      <div class="field-group">
+        <label>Time</label>
+        <input type="time" value="${meal.time || ''}" onchange="updateMeal(${dayIdx}, ${i}, 'time', this.value)">
+      </div>
+      <div class="fields">
+        <div class="field-group">
+          <label>Food</label>
+          <input type="text" value="${meal.food || ''}" placeholder="What food" style="width:120px;" onchange="updateMeal(${dayIdx}, ${i}, 'food', this.value)">
+        </div>
+        <div class="field-group">
+          <label>Amount</label>
+          <input type="text" value="${meal.amount || ''}" placeholder="e.g. 2 tbsp" style="width:80px;" onchange="updateMeal(${dayIdx}, ${i}, 'amount', this.value)">
+        </div>
+        <div class="field-group">
+          <label>Eaten</label>
+          <select onchange="updateMeal(${dayIdx}, ${i}, 'eaten', this.value)">
+            <option value="" ${!meal.eaten ? 'selected' : ''}>--</option>
+            <option value="all" ${meal.eaten==='all' ? 'selected' : ''}>All</option>
+            <option value="most" ${meal.eaten==='most' ? 'selected' : ''}>Most</option>
+            <option value="some" ${meal.eaten==='some' ? 'selected' : ''}>Some</option>
+            <option value="little" ${meal.eaten==='little' ? 'selected' : ''}>Little</option>
+            <option value="none" ${meal.eaten==='none' ? 'selected' : ''}>Refused</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Kept down?</label>
+          <select onchange="updateMeal(${dayIdx}, ${i}, 'kept', this.value)">
+            <option value="yes" ${meal.kept!=='no' ? 'selected' : ''}>Yes</option>
+            <option value="no" ${meal.kept==='no' ? 'selected' : ''}>No (vomited)</option>
+          </select>
+        </div>
+        <button class="remove-btn" onclick="removeMeal(${dayIdx}, ${i})" title="Remove">×</button>
+      </div>
+    </div>
+  `;
+}
+
+// Data manipulation
+function toggleMed(dayIdx, key, checked) {
+  const data = loadDay(dayIdx);
+  data.meds[key] = checked;
+  saveDay(dayIdx, data);
+  render();
+}
+
+function addBM(dayIdx) {
+  const data = loadDay(dayIdx);
+  data.bms.push({ time: '', consistency: '', color: '', blood: 'no', notes: '' });
+  saveDay(dayIdx, data);
+  render();
+}
+
+function updateBM(dayIdx, i, field, value) {
+  const data = loadDay(dayIdx);
+  if (data.bms[i]) {
+    data.bms[i][field] = value;
+    saveDay(dayIdx, data);
+  }
+}
+
+function removeBM(dayIdx, i) {
+  const data = loadDay(dayIdx);
+  data.bms.splice(i, 1);
+  saveDay(dayIdx, data);
+  render();
+}
+
+function addMeal(dayIdx) {
+  const data = loadDay(dayIdx);
+  data.meals.push({ time: '', food: '', amount: '', eaten: '', kept: 'yes' });
+  saveDay(dayIdx, data);
+  render();
+}
+
+function updateMeal(dayIdx, i, field, value) {
+  const data = loadDay(dayIdx);
+  if (data.meals[i]) {
+    data.meals[i][field] = value;
+    saveDay(dayIdx, data);
+  }
+}
+
+function removeMeal(dayIdx, i) {
+  const data = loadDay(dayIdx);
+  data.meals.splice(i, 1);
+  saveDay(dayIdx, data);
+  render();
+}
+
+// Urine tracking
+function urineEntryHTML(dayIdx, i, u) {
+  return `
+    <div class="log-entry">
+      <div class="field-group">
+        <label>Time</label>
+        <input type="time" value="${u.time || ''}" onchange="updateUrine(${dayIdx}, ${i}, 'time', this.value)">
+      </div>
+      <div class="fields">
+        <div class="field-group">
+          <label>Amount</label>
+          <select onchange="updateUrine(${dayIdx}, ${i}, 'amount', this.value)">
+            <option value="" ${!u.amount ? 'selected' : ''}>--</option>
+            <option value="small" ${u.amount==='small' ? 'selected' : ''}>Small</option>
+            <option value="normal" ${u.amount==='normal' ? 'selected' : ''}>Normal</option>
+            <option value="large" ${u.amount==='large' ? 'selected' : ''}>Large</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Color</label>
+          <select onchange="updateUrine(${dayIdx}, ${i}, 'color', this.value)">
+            <option value="" ${!u.color ? 'selected' : ''}>--</option>
+            <option value="clear" ${u.color==='clear' ? 'selected' : ''}>Clear</option>
+            <option value="light-yellow" ${u.color==='light-yellow' ? 'selected' : ''}>Light yellow</option>
+            <option value="yellow" ${u.color==='yellow' ? 'selected' : ''}>Yellow (normal)</option>
+            <option value="dark-yellow" ${u.color==='dark-yellow' ? 'selected' : ''}>Dark yellow</option>
+            <option value="orange" ${u.color==='orange' ? 'selected' : ''}>Orange</option>
+            <option value="red-tinged" ${u.color==='red-tinged' ? 'selected' : ''}>Red/blood-tinged</option>
+          </select>
+        </div>
+        <button class="remove-btn" onclick="removeUrine(${dayIdx}, ${i})" title="Remove">×</button>
+      </div>
+      <div style="grid-column:1/-1;">
+        <textarea style="width:100%;min-height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg);" placeholder="Notes..." onchange="updateUrine(${dayIdx}, ${i}, 'notes', this.value)">${u.notes || ''}</textarea>
+      </div>
+      <div style="grid-column:1/-1;" class="photo-capture">
+        <label class="photo-btn" for="urine-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
+        <input type="file" id="urine-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'urine', ${i}, this)">
+        <div class="photo-grid">
+          ${(u.photos || []).map((p, pi) => `
+            <div class="photo-thumb">
+              <img src="${p}" onclick="showPhoto(this.src)" alt="Urine photo">
+              <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'urine', ${i}, ${pi})">×</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addUrine(dayIdx) {
+  const data = loadDay(dayIdx);
+  if (!data.urinations) data.urinations = [];
+  data.urinations.push({ time: '', amount: '', color: '', notes: '' });
+  saveDay(dayIdx, data);
+  render();
+}
+
+function updateUrine(dayIdx, i, field, value) {
+  const data = loadDay(dayIdx);
+  if (data.urinations && data.urinations[i]) {
+    data.urinations[i][field] = value;
+    saveDay(dayIdx, data);
+  }
+}
+
+function removeUrine(dayIdx, i) {
+  const data = loadDay(dayIdx);
+  if (data.urinations) {
+    data.urinations.splice(i, 1);
+    saveDay(dayIdx, data);
+    render();
+  }
+}
+
+// Photo functions
+function addPhoto(dayIdx, type, entryIdx, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const maxSize = 800;
+      let w = img.width, h = img.height;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+        else { w = Math.round(w * maxSize / h); h = maxSize; }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL('image/jpeg', 0.6);
+      const data = loadDay(dayIdx);
+      if (type === 'bm' && data.bms[entryIdx]) {
+        if (!data.bms[entryIdx].photos) data.bms[entryIdx].photos = [];
+        data.bms[entryIdx].photos.push(compressed);
+      } else if (type === 'urine' && data.urinations && data.urinations[entryIdx]) {
+        if (!data.urinations[entryIdx].photos) data.urinations[entryIdx].photos = [];
+        data.urinations[entryIdx].photos.push(compressed);
+      }
+      saveDay(dayIdx, data);
+      render();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function showPhoto(src) {
+  const modal = document.getElementById('photoModal');
+  document.getElementById('photoModalImg').src = src;
+  modal.classList.add('active');
+}
+
+function removePhoto(dayIdx, type, entryIdx, photoIdx) {
+  const data = loadDay(dayIdx);
+  if (type === 'bm' && data.bms[entryIdx] && data.bms[entryIdx].photos) {
+    data.bms[entryIdx].photos.splice(photoIdx, 1);
+  } else if (type === 'urine' && data.urinations && data.urinations[entryIdx] && data.urinations[entryIdx].photos) {
+    data.urinations[entryIdx].photos.splice(photoIdx, 1);
+  }
+  saveDay(dayIdx, data);
+  render();
+}
+
+function updateSymptom(dayIdx, field, value) {
+  const data = loadDay(dayIdx);
+  data.symptoms[field] = value;
+  saveDay(dayIdx, data);
+  renderSummary();
+}
+
+function updateNotes(dayIdx, value) {
+  const data = loadDay(dayIdx);
+  data.notes = value;
+  saveDay(dayIdx, data);
+}
+
+function clearDay() {
+  if (confirm(`Clear all data for Day ${currentDay + 1}? This cannot be undone.`)) {
+    localStorage.removeItem(getKey(currentDay));
+    render();
+  }
+}
+
+function exportData() {
+  const allData = {};
+  for (let i = 0; i < DAYS; i++) {
+    const d = getDayDate(i);
+    allData[`day${i+1}_${d.toISOString().slice(0,10)}`] = loadDay(i);
+  }
+  const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `harlow_tracker_export_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Pre-populate Day 1 with known data
+(function initDay1() {
+  if (!dayHasData(0)) {
+    const data = loadDay(0);
+    data.meds['prn_Ondansetron_PRN'] = true;
+    data.meds['scheduled_Metronidazole_06:00'] = true;
+    data.meds['scheduled_Metoclopramide_06:00'] = true;
+    data.notes = 'Discharged from CARE 3/11. Seen at Skyline 3/12. Metronidazole + Metoclopramide given in afternoon. Ondansetron given at 2 PM for nausea.';
+    saveDay(0, data);
+  }
+})();
+
+// Auto-select today if within range
+(function autoSelectToday() {
+  const today = new Date();
+  for (let i = 0; i < DAYS; i++) {
+    const d = getDayDate(i);
+    if (d.toDateString() === today.toDateString()) {
+      currentDay = i;
+      break;
+    }
+  }
+})();
+
+render();
+</script>
+
+<div class="photo-modal" id="photoModal" onclick="this.classList.remove('active')">
+  <img id="photoModalImg" src="" alt="Full size photo">
+</div>
+
+</body>
+</html>

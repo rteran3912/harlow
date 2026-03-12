@@ -1,0 +1,11 @@
+# Source documents (private medical records)
+*.pdf
+*.jpeg
+*.jpg
+*.png
+
+# macOS
+.DS_Store
+
+# Rejected files
+serve.sh
