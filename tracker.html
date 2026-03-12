@@ -7,6 +7,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Harlow">
 <title>Harlow's Care Tracker</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 <style>
   :root {
     --bg: #F8F6F2;
@@ -495,6 +497,7 @@
     <option value="Raymond">Raymond</option>
     <option value="Mom">Mom</option>
   </select>
+  <span id="syncStatus" style="margin-left:auto;font-size:12px;font-weight:500;">🔄 Connecting...</span>
 </div>
 
 <div class="nav" id="dayNav"></div>
@@ -516,7 +519,53 @@
   <div class="report-content" id="reportContent"></div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
+// Firebase setup
+const firebaseConfig = {
+  apiKey: "AIzaSyCdFqgqSCNDEAIdAG7BZx_abdxErWxQ-bw",
+  authDomain: "harlow-tracker.firebaseapp.com",
+  databaseURL: "https://harlow-tracker-default-rtdb.firebaseio.com",
+  projectId: "harlow-tracker",
+  storageBucket: "harlow-tracker.firebasestorage.app",
+  messagingSenderId: "423756647096",
+  appId: "1:423756647096:web:7d1c3e8c3e86b6f558424d"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+let firebaseReady = false;
+let firebaseCache = {};
+
+// Listen for real-time changes from Firebase
+db.ref('days').on('value', (snapshot) => {
+  firebaseReady = true;
+  const fbData = snapshot.val() || {};
+  firebaseCache = fbData;
+  // Sync to localStorage as backup
+  Object.keys(fbData).forEach(key => {
+    try { localStorage.setItem(key, JSON.stringify(fbData[key])); } catch(e) {}
+  });
+  render();
+}, (err) => {
+  console.warn('Firebase offline, using localStorage:', err.message);
+  firebaseReady = false;
+});
+
+// Sync status indicator
+function updateSyncStatus() {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (firebaseReady) {
+    el.innerHTML = '🟢 Synced';
+    el.style.color = 'var(--accent)';
+  } else {
+    el.innerHTML = '🔴 Offline (local only)';
+    el.style.color = 'var(--warning)';
+  }
+}
+setInterval(updateSyncStatus, 3000);
+
 const START = new Date(2026, 2, 12); // March 12, 2026
 const DAYS = 14;
 let currentDay = 0;
@@ -598,22 +647,46 @@ function shortDate(d) {
 // localStorage
 function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
 
+function migrateSymptoms(data) {
+  if (data.symptoms && !Array.isArray(data.symptoms)) {
+    const old = data.symptoms;
+    if (old.energy || old.pain || old.water || old.appetite || old.observedTime) {
+      data.symptoms = [{ time: old.observedTime || '', energy: old.energy || 3, appetite: old.appetite || '', pain: old.pain || '', water: old.water || 'normal', loggedBy: '' }];
+    } else {
+      data.symptoms = [];
+    }
+  }
+  if (!Array.isArray(data.symptoms)) data.symptoms = [];
+  return data;
+}
+
 function loadDay(dayIdx) {
-  const raw = localStorage.getItem(getKey(dayIdx));
-  if (raw) return JSON.parse(raw);
-  return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: { energy: 3, vomiting: 0, pain: '', water: 'normal' }, notes: '' };
+  const key = getKey(dayIdx);
+  // Prefer Firebase cache, fall back to localStorage
+  if (firebaseCache[key]) return migrateSymptoms(JSON.parse(JSON.stringify(firebaseCache[key])));
+  const raw = localStorage.getItem(key);
+  if (raw) return migrateSymptoms(JSON.parse(raw));
+  return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
 }
 
 function saveDay(dayIdx, data) {
+  const key = getKey(dayIdx);
   try {
-    localStorage.setItem(getKey(dayIdx), JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
   } catch (e) {
     alert('Storage full! Try removing old photos to free space. Your latest change may not have saved.');
+  }
+  // Sync to Firebase
+  if (firebaseReady) {
+    db.ref('days/' + key).set(data).catch(err => {
+      console.warn('Firebase write failed:', err.message);
+    });
   }
 }
 
 function dayHasData(dayIdx) {
-  return localStorage.getItem(getKey(dayIdx)) !== null;
+  const key = getKey(dayIdx);
+  return firebaseCache[key] != null || localStorage.getItem(key) !== null;
 }
 
 // Calculate day completion ratio
@@ -669,7 +742,8 @@ function renderSummary() {
     <span class="stat">🍽 <strong>${data.meals.length}</strong></span>
     <span class="stat">💧 <strong>${(data.urinations||[]).length}</strong></span>
     <span class="stat">🤢 <strong>${(data.vomits||[]).length}</strong></span>
-    <span class="stat">⚡ <strong>${data.symptoms.energy}/5</strong></span>
+    <span class="stat">⚡ <strong>${data.symptoms.length ? data.symptoms[data.symptoms.length-1].energy + '/5' : '--'}</strong></span>
+    <span class="stat">📋 <strong>${data.symptoms.length}</strong> obs</span>
   `;
 }
 
@@ -803,54 +877,21 @@ function render() {
     </div>
   `;
 
-  // Symptoms
+  // Symptoms (multiple observations per day)
+  if (!data.symptoms) data.symptoms = [];
   html += `
     <div class="section">
-      <h2>Symptoms</h2>
-      <div style="margin-bottom:12px;">
-        <label style="font-size:13px;font-weight:500;">Time observed:</label>
-        <input type="time" value="${data.symptoms.observedTime || ''}" onchange="updateSymptom(${dayIdx}, 'observedTime', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;background:var(--bg);">
+      <h2>Symptom Observations</h2>
+      <div class="log-entries">
+  `;
+
+  data.symptoms.forEach((obs, i) => {
+    html += symptomEntryHTML(dayIdx, i, obs);
+  });
+
+  html += `
       </div>
-      <div class="symptom-grid">
-        <div class="symptom-item">
-          <label>Energy Level</label>
-          <div class="range-row">
-            <span style="font-size:12px;color:var(--muted);">Lethargic</span>
-            <input type="range" min="1" max="5" value="${data.symptoms.energy}" oninput="updateSymptom(${dayIdx}, 'energy', this.value); this.nextElementSibling.textContent=this.value">
-            <span class="range-val">${data.symptoms.energy}</span>
-            <span style="font-size:12px;color:var(--muted);">Normal</span>
-          </div>
-        </div>
-        <div class="symptom-item">
-          <label>Appetite</label>
-          <select onchange="updateSymptom(${dayIdx}, 'appetite', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;background:var(--bg);">
-            <option value="" ${!data.symptoms.appetite ? 'selected' : ''}>--</option>
-            <option value="none" ${data.symptoms.appetite==='none' ? 'selected' : ''}>Refused all food</option>
-            <option value="poor" ${data.symptoms.appetite==='poor' ? 'selected' : ''}>Poor (eating little)</option>
-            <option value="fair" ${data.symptoms.appetite==='fair' ? 'selected' : ''}>Fair (eating some)</option>
-            <option value="good" ${data.symptoms.appetite==='good' ? 'selected' : ''}>Good (eating well)</option>
-            <option value="normal" ${data.symptoms.appetite==='normal' ? 'selected' : ''}>Normal</option>
-          </select>
-        </div>
-        <div class="symptom-item">
-          <label>Pain Signs</label>
-          <select onchange="updateSymptom(${dayIdx}, 'pain', this.value)">
-            <option value="" ${data.symptoms.pain === '' ? 'selected' : ''}>None observed</option>
-            <option value="mild" ${data.symptoms.pain === 'mild' ? 'selected' : ''}>Mild (restless, lip-licking)</option>
-            <option value="moderate" ${data.symptoms.pain === 'moderate' ? 'selected' : ''}>Moderate (hunching, guarding)</option>
-            <option value="severe" ${data.symptoms.pain === 'severe' ? 'selected' : ''}>Severe (whimpering, won't move)</option>
-          </select>
-        </div>
-        <div class="symptom-item">
-          <label>Water Intake</label>
-          <select onchange="updateSymptom(${dayIdx}, 'water', this.value)">
-            <option value="none" ${data.symptoms.water === 'none' ? 'selected' : ''}>None</option>
-            <option value="low" ${data.symptoms.water === 'low' ? 'selected' : ''}>Low</option>
-            <option value="normal" ${data.symptoms.water === 'normal' ? 'selected' : ''}>Normal</option>
-            <option value="high" ${data.symptoms.water === 'high' ? 'selected' : ''}>High (excessive)</option>
-          </select>
-        </div>
-      </div>
+      <button class="add-btn" onclick="addSymptomObs(${dayIdx})">+ Add observation</button>
     </div>
   `;
 
@@ -919,7 +960,7 @@ function bmEntryHTML(dayIdx, i, bm) {
         <div class="photo-grid">
           ${(bm.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${p}" onclick="showPhoto(this.src)" alt="BM photo">
+              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="BM photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'bm', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1092,7 +1133,7 @@ function urineEntryHTML(dayIdx, i, u) {
         <div class="photo-grid">
           ${(u.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${p}" onclick="showPhoto(this.src)" alt="Urine photo">
+              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Urine photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'urine', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1178,7 +1219,7 @@ function vomitEntryHTML(dayIdx, i, v) {
         <div class="photo-grid">
           ${(v.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${p}" onclick="showPhoto(this.src)" alt="Vomit photo">
+              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Vomit photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'vomit', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1245,6 +1286,9 @@ function addPhoto(dayIdx, type, entryIdx, input) {
       } else if (type === 'vomit' && data.vomits && data.vomits[entryIdx]) {
         if (!data.vomits[entryIdx].photos) data.vomits[entryIdx].photos = [];
         data.vomits[entryIdx].photos.push(compressed);
+      } else if (type === 'symptom' && data.symptoms && data.symptoms[entryIdx]) {
+        if (!data.symptoms[entryIdx].photos) data.symptoms[entryIdx].photos = [];
+        data.symptoms[entryIdx].photos.push(compressed);
       }
       saveDay(dayIdx, data);
       render();
@@ -1269,16 +1313,108 @@ function removePhoto(dayIdx, type, entryIdx, photoIdx) {
     data.urinations[entryIdx].photos.splice(photoIdx, 1);
   } else if (type === 'vomit' && data.vomits && data.vomits[entryIdx] && data.vomits[entryIdx].photos) {
     data.vomits[entryIdx].photos.splice(photoIdx, 1);
+  } else if (type === 'symptom' && data.symptoms && data.symptoms[entryIdx] && data.symptoms[entryIdx].photos) {
+    data.symptoms[entryIdx].photos.splice(photoIdx, 1);
   }
   saveDay(dayIdx, data);
   render();
 }
 
-function updateSymptom(dayIdx, field, value) {
+function symptomEntryHTML(dayIdx, i, obs) {
+  return `
+    <div class="log-entry">
+      <div class="field-group">
+        <label>Time</label>
+        <input type="time" value="${obs.time || ''}" onchange="updateSymptomObs(${dayIdx}, ${i}, 'time', this.value)">
+      </div>
+      <div class="fields" style="flex-wrap:wrap;">
+        <div class="symptom-item" style="min-width:140px;">
+          <label>Energy Level</label>
+          <div class="range-row">
+            <span style="font-size:11px;color:var(--muted);">Low</span>
+            <input type="range" min="1" max="5" value="${obs.energy || 3}" oninput="updateSymptomObs(${dayIdx}, ${i}, 'energy', this.value); this.nextElementSibling.textContent=this.value">
+            <span class="range-val">${obs.energy || 3}</span>
+            <span style="font-size:11px;color:var(--muted);">Normal</span>
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Appetite</label>
+          <select onchange="updateSymptomObs(${dayIdx}, ${i}, 'appetite', this.value)">
+            <option value="" ${!obs.appetite ? 'selected' : ''}>--</option>
+            <option value="none" ${obs.appetite==='none' ? 'selected' : ''}>Refused all food</option>
+            <option value="poor" ${obs.appetite==='poor' ? 'selected' : ''}>Poor (eating little)</option>
+            <option value="fair" ${obs.appetite==='fair' ? 'selected' : ''}>Fair (eating some)</option>
+            <option value="good" ${obs.appetite==='good' ? 'selected' : ''}>Good (eating well)</option>
+            <option value="normal" ${obs.appetite==='normal' ? 'selected' : ''}>Normal</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Pain Signs</label>
+          <select onchange="updateSymptomObs(${dayIdx}, ${i}, 'pain', this.value)">
+            <option value="" ${(obs.pain||'') === '' ? 'selected' : ''}>None observed</option>
+            <option value="mild" ${obs.pain === 'mild' ? 'selected' : ''}>Mild (restless, lip-licking)</option>
+            <option value="moderate" ${obs.pain === 'moderate' ? 'selected' : ''}>Moderate (hunching, guarding)</option>
+            <option value="severe" ${obs.pain === 'severe' ? 'selected' : ''}>Severe (whimpering, won't move)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Water Intake</label>
+          <select onchange="updateSymptomObs(${dayIdx}, ${i}, 'water', this.value)">
+            <option value="none" ${obs.water === 'none' ? 'selected' : ''}>None</option>
+            <option value="low" ${obs.water === 'low' ? 'selected' : ''}>Low</option>
+            <option value="normal" ${obs.water === 'normal' ? 'selected' : ''}>Normal</option>
+            <option value="high" ${obs.water === 'high' ? 'selected' : ''}>High (excessive)</option>
+          </select>
+        </div>
+        <button class="remove-btn" onclick="removeSymptomObs(${dayIdx}, ${i})" title="Remove">×</button>
+        ${obs.loggedBy ? `<span style="font-size:11px;color:var(--muted);">— ${esc(obs.loggedBy)}</span>` : ''}
+      </div>
+      <div style="grid-column:1/-1;">
+        <textarea style="width:100%;min-height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg);" placeholder="Observations (behavior, demeanor, anything notable)..." onchange="updateSymptomObs(${dayIdx}, ${i}, 'notes', this.value)">${esc(obs.notes || '')}</textarea>
+      </div>
+      <div style="grid-column:1/-1;" class="photo-capture">
+        <label class="photo-btn" for="symptom-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
+        <input type="file" id="symptom-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'symptom', ${i}, this)">
+        <div class="photo-grid">
+          ${(obs.photos || []).map((p, pi) => `
+            <div class="photo-thumb">
+              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Observation photo">
+              <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'symptom', ${i}, ${pi})">×</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addSymptomObs(dayIdx) {
+  const cg = getCaregiver();
+  if (!cg) { alert('Please select a caregiver before logging.'); return; }
   const data = loadDay(dayIdx);
-  data.symptoms[field] = value;
+  if (!Array.isArray(data.symptoms)) data.symptoms = [];
+  data.symptoms.push({ time: '', energy: 3, appetite: '', pain: '', water: 'normal', notes: '', loggedBy: cg });
   saveDay(dayIdx, data);
-  renderSummary();
+  render();
+}
+
+function updateSymptomObs(dayIdx, i, field, value) {
+  const data = loadDay(dayIdx);
+  if (data.symptoms && data.symptoms[i]) {
+    data.symptoms[i][field] = value;
+    saveDay(dayIdx, data);
+    if (field === 'energy') renderSummary();
+  }
+}
+
+function removeSymptomObs(dayIdx, i) {
+  if (!confirm('Remove this observation? This cannot be undone.')) return;
+  const data = loadDay(dayIdx);
+  if (data.symptoms) {
+    data.symptoms.splice(i, 1);
+    saveDay(dayIdx, data);
+    render();
+  }
 }
 
 function updateNotes(dayIdx, value) {
@@ -1289,7 +1425,10 @@ function updateNotes(dayIdx, value) {
 
 function clearDay() {
   if (confirm(`Clear all data for Day ${currentDay + 1}? This cannot be undone.`)) {
-    localStorage.removeItem(getKey(currentDay));
+    const key = getKey(currentDay);
+    localStorage.removeItem(key);
+    if (firebaseReady) db.ref('days/' + key).remove();
+    delete firebaseCache[key];
     render();
   }
 }
@@ -1376,7 +1515,8 @@ function generateVetReport() {
     const meds = getMedsForDay(i);
     const scheduled = meds.filter(m => m.type === 'scheduled' || m.type === 'injection' || m.type === 'eye');
     const done = scheduled.filter(m => data.meds[`${m.type}_${m.name}_${m.time}`]).length;
-    const s = data.symptoms;
+    const syms = Array.isArray(data.symptoms) ? data.symptoms : [];
+    const lastObs = syms.length ? syms[syms.length - 1] : {};
     const vomitCount = (data.vomits || []).length;
     const hasBlood = data.bms.some(bm => bm.blood === 'yes') || (data.vomits || []).some(v => v.blood === 'yes');
     html += `<tr>
@@ -1386,9 +1526,9 @@ function generateVetReport() {
       <td>${data.bms.length}</td>
       <td>${data.meals.length}</td>
       <td>${vomitCount > 0 ? '<strong style="color:red;">' + vomitCount + '</strong>' : '0'}</td>
-      <td>${s.energy}/5</td>
-      <td>${s.appetite || '--'}</td>
-      <td>${s.pain || 'None'}</td>
+      <td>${lastObs.energy ? lastObs.energy + '/5' : '--'} ${syms.length > 1 ? '(' + syms.length + ' obs)' : ''}</td>
+      <td>${lastObs.appetite || '--'}</td>
+      <td>${lastObs.pain || 'None'}</td>
       <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;">${hasBlood ? '<strong style="color:red;">BLOOD</strong> ' : ''}${esc(data.notes).substring(0, 60)}${(data.notes||'').length > 60 ? '...' : ''}</td>
     </tr>`;
   }
@@ -1431,7 +1571,7 @@ function generateVetReport() {
       data.bms.forEach((bm, bi) => {
         if (bm.photos && bm.photos.length) {
           html += `<div class="report-photos">`;
-          bm.photos.forEach(p => { html += `<img src="${p}" alt="BM Day ${i+1} #${bi+1}">`; });
+          bm.photos.forEach(p => { html += `<img src="${esc(p)}" alt="BM Day ${i+1} #${bi+1}">`; });
           html += `</div>`;
         }
       });
@@ -1456,7 +1596,7 @@ function generateVetReport() {
       data.vomits.forEach((v, vi) => {
         if (v.photos && v.photos.length) {
           html += `<div class="report-photos">`;
-          v.photos.forEach(p => { html += `<img src="${p}" alt="Vomit Day ${i+1} #${vi+1}">`; });
+          v.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Vomit Day ${i+1} #${vi+1}">`; });
           html += `</div>`;
         }
       });
@@ -1472,16 +1612,28 @@ function generateVetReport() {
       data.urinations.forEach((u, ui) => {
         if (u.photos && u.photos.length) {
           html += `<div class="report-photos">`;
-          u.photos.forEach(p => { html += `<img src="${p}" alt="Urine Day ${i+1} #${ui+1}">`; });
+          u.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Urine Day ${i+1} #${ui+1}">`; });
           html += `</div>`;
         }
       });
     }
 
     // Symptoms
-    const s = data.symptoms;
-    html += `<table><tr><th>Energy</th><th>Appetite</th><th>Pain</th><th>Water</th>${s.observedTime ? '<th>Observed</th>' : ''}</tr>`;
-    html += `<tr><td>${s.energy}/5</td><td>${s.appetite || '--'}</td><td>${s.pain || 'None'}</td><td>${s.water || 'Normal'}</td>${s.observedTime ? `<td>${s.observedTime}</td>` : ''}</tr></table>`;
+    const symsReport = Array.isArray(data.symptoms) ? data.symptoms : [];
+    if (symsReport.length) {
+      html += `<table><tr><th>Time</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Water</th><th>By</th><th>Notes</th></tr>`;
+      symsReport.forEach((obs, si) => {
+        html += `<tr><td>${obs.time || '--'}</td><td>${obs.energy || '--'}/5</td><td>${obs.appetite || '--'}</td><td>${obs.pain || 'None'}</td><td>${obs.water || '--'}</td><td>${esc(obs.loggedBy || '')}</td><td>${esc(obs.notes || '')}</td></tr>`;
+      });
+      html += `</table>`;
+      symsReport.forEach((obs, si) => {
+        if (obs.photos && obs.photos.length) {
+          html += `<div class="report-photos">`;
+          obs.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Observation Day ${i+1} #${si+1}">`; });
+          html += `</div>`;
+        }
+      });
+    }
 
     if (data.notes) {
       html += `<p style="font-size:13px;margin-top:6px;"><strong>Notes:</strong> ${esc(data.notes)}</p>`;
@@ -1521,6 +1673,11 @@ function emailReport() {
 }
 
 render();
+
+// Service Worker registration for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration failed:', err));
+}
 </script>
 
 <div class="photo-modal" id="photoModal" onclick="this.classList.remove('active')">

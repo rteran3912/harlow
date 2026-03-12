@@ -1,0 +1,16 @@
+{
+  "name": "Harlow's Care Tracker",
+  "short_name": "Harlow",
+  "description": "IBD/AHDS recovery tracker for Harlow Teran",
+  "start_url": "/harlow/tracker.html",
+  "display": "standalone",
+  "background_color": "#F8F6F2",
+  "theme_color": "#4A7C6F",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
