@@ -516,11 +516,12 @@
     <span style="color:#5B6ABF;"><strong>Steroid Load:</strong> Harlow is on 3 corticosteroids (Dex SP injection + Neopolydex eye + Difluprednate eye). Confirm vet is aware of all three sources.</span>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--amber);">
       <strong>💉 Dex SP Schedule:</strong>
-      <select id="dexFreqSelect" onchange="setDexFrequency(this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-left:6px;">
+      <select id="dexFreqSelect" onchange="changeDexFrequency(this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-left:6px;">
         <option value="2">Every 2 days (active flare)</option>
         <option value="3">Every 3 days (IBD subsiding)</option>
       </select>
-      <span id="dexSchedulePreview" style="display:block;margin-top:6px;font-size:12px;color:var(--muted);"></span>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">Changing this only affects days from today forward. Past injection days stay locked.</div>
+      <span id="dexSchedulePreview" style="display:block;margin-top:6px;font-size:12px;color:var(--text);white-space:pre-line;"></span>
     </div>
   </div>
 </details>
@@ -664,31 +665,110 @@ const PRN_MEDS = [
 // Injection schedule
 const B12_DAYS = [5, 12]; // 3/17, 3/24
 
-// Dex schedule: configurable every 2 or 3 days. First injection is always day index 2 (3/14).
-function getDexFrequency() {
-  return parseInt(localStorage.getItem('harlow_dex_freq') || '2');
+// Dex schedule: stores a list of frequency changes with the day they take effect.
+// Format: [{fromDay: 2, freq: 2}] — first injection day 2 (3/14), every 2 days.
+// If changed on day 5 to every 3: [{fromDay: 2, freq: 2}, {fromDay: 5, freq: 3}]
+// Past days stay locked; only future days adjust from the last Dex before the change.
+function getDexSchedule() {
+  const raw = localStorage.getItem('harlow_dex_schedule');
+  if (raw) {
+    try { return JSON.parse(raw); } catch(e) {}
+  }
+  // Migrate from old single-frequency setting if it exists
+  const oldFreq = localStorage.getItem('harlow_dex_freq');
+  if (oldFreq) {
+    const schedule = [{ fromDay: 2, freq: parseInt(oldFreq) }];
+    localStorage.setItem('harlow_dex_schedule', JSON.stringify(schedule));
+    localStorage.removeItem('harlow_dex_freq');
+    return schedule;
+  }
+  return [{ fromDay: 2, freq: 2 }];
 }
 
-function setDexFrequency(freq) {
-  localStorage.setItem('harlow_dex_freq', freq);
+function saveDexSchedule(schedule) {
+  localStorage.setItem('harlow_dex_schedule', JSON.stringify(schedule));
   if (firebaseReady && db) {
-    db.ref('settings/dexFreq').set(freq);
+    db.ref('settings/dexSchedule').set(schedule);
   }
-  const preview = document.getElementById('dexSchedulePreview');
-  if (preview) {
-    const days = getDexDays();
-    preview.textContent = 'Injection days: ' + days.map(d => 'Day ' + (d+1) + ' (' + shortDate(getDayDate(d)) + ')').join(', ');
-  }
-  render();
 }
 
 function getDexDays() {
-  const freq = getDexFrequency();
+  const schedule = getDexSchedule();
   const days = [];
-  for (let i = 2; i < DAYS; i += freq) {
-    days.push(i);
+  // Walk through each schedule segment and generate Dex days
+  for (let seg = 0; seg < schedule.length; seg++) {
+    const s = schedule[seg];
+    const nextFrom = seg < schedule.length - 1 ? schedule[seg + 1].fromDay : DAYS;
+    // Find the first Dex day in this segment
+    let firstDay;
+    if (seg === 0) {
+      firstDay = s.fromDay; // first segment starts at its fromDay
+    } else {
+      // Find last Dex day from previous segments to calculate spacing
+      const lastDex = days.length > 0 ? days[days.length - 1] : s.fromDay - s.freq;
+      firstDay = lastDex + s.freq;
+    }
+    for (let d = firstDay; d < nextFrom && d < DAYS; d += s.freq) {
+      days.push(d);
+    }
   }
   return days;
+}
+
+function getCurrentDexFreq() {
+  const schedule = getDexSchedule();
+  // Find the active frequency for the currently selected day
+  let freq = 2;
+  for (const s of schedule) {
+    if (currentDay >= s.fromDay) freq = s.freq;
+  }
+  return freq;
+}
+
+function changeDexFrequency(newFreq) {
+  const schedule = getDexSchedule();
+  const dexDays = getDexDays();
+  newFreq = parseInt(newFreq);
+
+  // Find today's day index (use actual today, not selected day)
+  let todayIdx = 0;
+  const today = new Date();
+  for (let i = 0; i < DAYS; i++) {
+    if (getDayDate(i).toDateString() === today.toDateString()) { todayIdx = i; break; }
+  }
+
+  // Find the last Dex day on or before today (these are locked)
+  let lastLockedDex = -1;
+  for (const d of dexDays) {
+    if (d <= todayIdx) lastLockedDex = d;
+  }
+
+  // Remove any future schedule segments (from today onward)
+  const newSchedule = schedule.filter(s => s.fromDay <= todayIdx);
+  // If no segments remain, keep at least the original
+  if (newSchedule.length === 0) newSchedule.push(schedule[0]);
+
+  // Add the new segment starting from the next Dex day after the last locked one
+  const nextDexDay = lastLockedDex >= 0 ? lastLockedDex + newFreq : 2;
+  newSchedule.push({ fromDay: nextDexDay, freq: newFreq });
+
+  saveDexSchedule(newSchedule);
+  updateDexPreview();
+  render();
+}
+
+function updateDexPreview() {
+  const preview = document.getElementById('dexSchedulePreview');
+  if (!preview) return;
+  const days = getDexDays();
+  const schedule = getDexSchedule();
+  let text = 'Injection days: ' + days.map(d => 'Day ' + (d+1) + ' (' + shortDate(getDayDate(d)) + ')').join(', ');
+  if (schedule.length > 1) {
+    text += '\nSchedule changes: ' + schedule.map(s =>
+      'Every ' + s.freq + ' days from Day ' + (s.fromDay + 1)
+    ).join(' → ');
+  }
+  preview.textContent = text;
 }
 
 function getMedsForDay(dayIdx) {
@@ -698,7 +778,10 @@ function getMedsForDay(dayIdx) {
     meds.push(...EVERY_OTHER_NIGHT_EYE_MEDS);
   }
   if (dexDays.includes(dayIdx)) {
-    const freq = getDexFrequency();
+    // Find active frequency for this day
+    const schedule = getDexSchedule();
+    let freq = 2;
+    for (const s of schedule) { if (dayIdx >= s.fromDay) freq = s.freq; }
     meds.push({ time: 'ANY', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: `Every ${freq} days`, type: 'injection' });
   }
   if (B12_DAYS.includes(dayIdx)) {
@@ -1629,14 +1712,9 @@ function exportData() {
 
 // Restore Dex frequency setting and show schedule preview
 (function restoreDexFreq() {
-  const freq = getDexFrequency();
   const sel = document.getElementById('dexFreqSelect');
-  if (sel) sel.value = freq;
-  const preview = document.getElementById('dexSchedulePreview');
-  if (preview) {
-    const days = getDexDays();
-    preview.textContent = 'Injection days: ' + days.map(d => 'Day ' + (d+1) + ' (' + shortDate(getDayDate(d)) + ')').join(', ');
-  }
+  if (sel) sel.value = getCurrentDexFreq();
+  updateDexPreview();
 })();
 
 // Vet Report Generator
