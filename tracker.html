@@ -514,6 +514,14 @@
     <strong>DO NOT</strong> give Metoclopramide + Ondansetron at the same time (serotonin overlap)<br>
     <strong>Eye drops:</strong> wait 5 min between each drop in the same eye. Order: Dorzolamide → Bromfenac → Neopolydex → Difluprednate<br><br>
     <span style="color:#5B6ABF;"><strong>Steroid Load:</strong> Harlow is on 3 corticosteroids (Dex SP injection + Neopolydex eye + Difluprednate eye). Confirm vet is aware of all three sources.</span>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--amber);">
+      <strong>💉 Dex SP Schedule:</strong>
+      <select id="dexFreqSelect" onchange="setDexFrequency(this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-left:6px;">
+        <option value="2">Every 2 days (active flare)</option>
+        <option value="3">Every 3 days (IBD subsiding)</option>
+      </select>
+      <span id="dexSchedulePreview" style="display:block;margin-top:6px;font-size:12px;color:var(--muted);"></span>
+    </div>
   </div>
 </details>
 
@@ -653,17 +661,45 @@ const PRN_MEDS = [
   { time: 'PRN', name: 'Sub-Q Fluids (LRS)', dose: '100 mL subcutaneous', note: 'If dehydrated — max every other day', type: 'injection' },
 ];
 
-// Injection schedule: day index (0-based) -> injections
-const DEX_DAYS = [2, 4, 6, 8, 10, 12]; // 3/14, 3/16, 3/18, 3/20, 3/22, 3/24
+// Injection schedule
 const B12_DAYS = [5, 12]; // 3/17, 3/24
 
+// Dex schedule: configurable every 2 or 3 days. First injection is always day index 2 (3/14).
+function getDexFrequency() {
+  return parseInt(localStorage.getItem('harlow_dex_freq') || '2');
+}
+
+function setDexFrequency(freq) {
+  localStorage.setItem('harlow_dex_freq', freq);
+  if (firebaseReady && db) {
+    db.ref('settings/dexFreq').set(freq);
+  }
+  const preview = document.getElementById('dexSchedulePreview');
+  if (preview) {
+    const days = getDexDays();
+    preview.textContent = 'Injection days: ' + days.map(d => 'Day ' + (d+1) + ' (' + shortDate(getDayDate(d)) + ')').join(', ');
+  }
+  render();
+}
+
+function getDexDays() {
+  const freq = getDexFrequency();
+  const days = [];
+  for (let i = 2; i < DAYS; i += freq) {
+    days.push(i);
+  }
+  return days;
+}
+
 function getMedsForDay(dayIdx) {
+  const dexDays = getDexDays();
   let meds = DAILY_MEDS.filter(m => !m.endDay || dayIdx < m.endDay);
   if (EVERY_OTHER_NIGHT_EYE_DAYS.includes(dayIdx)) {
     meds.push(...EVERY_OTHER_NIGHT_EYE_MEDS);
   }
-  if (DEX_DAYS.includes(dayIdx)) {
-    meds.push({ time: 'ANY', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: 'Every other day', type: 'injection' });
+  if (dexDays.includes(dayIdx)) {
+    const freq = getDexFrequency();
+    meds.push({ time: 'ANY', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: `Every ${freq} days`, type: 'injection' });
   }
   if (B12_DAYS.includes(dayIdx)) {
     meds.push({ time: 'ANY', name: 'B-12 Injection', dose: '0.4 mL subcutaneous', note: 'Weekly', type: 'injection' });
@@ -722,17 +758,50 @@ function migrateData(data) {
   data.vomits.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   data.symptoms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   if (!data.meds) data.meds = {};
+  // Migrate med keys after eye med rename (added bottle/tube identifiers)
+  const medKeyRenames = {
+    'eye_Dorzolamide AM_08:00': 'eye_Dorzolamide AM (BLUE cap)_08:00',
+    'eye_Dorzolamide PM_20:00': 'eye_Dorzolamide PM (BLUE cap)_20:00',
+    'eye_Neomycin (Neopolydex) AM_08:00': 'eye_Neomycin/Neopolydex AM (small tube)_08:00',
+    'eye_Neomycin (Neopolydex) PM_20:00': 'eye_Neomycin/Neopolydex PM (small tube)_20:00',
+    'eye_Bromfenac Sodium_PM': 'eye_Bromfenac Sodium (GREY cap)_PM',
+    'eye_Difluprednate Ophthalmic_PM': 'eye_Difluprednate Ophthalmic (PINK cap)_PM',
+  };
+  let medsMigrated = false;
+  Object.keys(medKeyRenames).forEach(oldKey => {
+    if (data.meds[oldKey] !== undefined) {
+      data.meds[medKeyRenames[oldKey]] = data.meds[oldKey];
+      delete data.meds[oldKey];
+      if (data.medLog && data.medLog[oldKey]) {
+        if (!data.medLog) data.medLog = {};
+        data.medLog[medKeyRenames[oldKey]] = data.medLog[oldKey];
+        delete data.medLog[oldKey];
+      }
+      medsMigrated = true;
+    }
+  });
   if (!data.notes) data.notes = '';
+  data._migrated = medsMigrated;
   return data;
 }
 
 function loadDay(dayIdx) {
   const key = getKey(dayIdx);
-  // Prefer Firebase cache, fall back to localStorage
-  if (firebaseCache[key]) return migrateData(JSON.parse(JSON.stringify(firebaseCache[key])));
-  const raw = localStorage.getItem(key);
-  if (raw) return migrateData(JSON.parse(raw));
-  return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
+  let data;
+  if (firebaseCache[key]) {
+    data = migrateData(JSON.parse(JSON.stringify(firebaseCache[key])));
+  } else {
+    const raw = localStorage.getItem(key);
+    if (raw) data = migrateData(JSON.parse(raw));
+    else return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
+  }
+  // Persist migration changes so old keys don't stick around
+  if (data._migrated) {
+    delete data._migrated;
+    saveDay(dayIdx, data);
+  }
+  delete data._migrated;
+  return data;
 }
 
 let saveToastTimer = null;
@@ -784,7 +853,7 @@ function renderNav() {
   for (let i = 0; i < DAYS; i++) {
     const d = getDayDate(i);
     const btn = document.createElement('button');
-    const isInjection = DEX_DAYS.includes(i) || B12_DAYS.includes(i);
+    const isInjection = getDexDays().includes(i) || B12_DAYS.includes(i);
     const progress = getDayProgress(i);
     const dotClass = !dayHasData(i) ? 'none' : progress >= 1 ? 'complete' : 'partial';
     btn.innerHTML = `Day ${i+1} (${shortDate(d)}) <span class="day-dot ${dotClass}"></span>`;
@@ -835,7 +904,7 @@ function render() {
   const meds = getMedsForDay(dayIdx);
 
   let labels = [];
-  if (DEX_DAYS.includes(dayIdx)) labels.push('DEX SP INJECTION');
+  if (getDexDays().includes(dayIdx)) labels.push('DEX SP INJECTION');
   if (B12_DAYS.includes(dayIdx)) labels.push('B-12 INJECTION');
   if (dayIdx <= 4) labels.push('Activity restricted');
   if (dayIdx === 9) labels.push('Last probiotic day');
@@ -1555,6 +1624,18 @@ function exportData() {
   if (saved) {
     const sel = document.getElementById('caregiverSelect');
     if (sel) sel.value = saved;
+  }
+})();
+
+// Restore Dex frequency setting and show schedule preview
+(function restoreDexFreq() {
+  const freq = getDexFrequency();
+  const sel = document.getElementById('dexFreqSelect');
+  if (sel) sel.value = freq;
+  const preview = document.getElementById('dexSchedulePreview');
+  if (preview) {
+    const days = getDexDays();
+    preview.textContent = 'Injection days: ' + days.map(d => 'Day ' + (d+1) + ' (' + shortDate(getDayDate(d)) + ')').join(', ');
   }
 })();
 
