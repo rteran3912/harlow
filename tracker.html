@@ -582,10 +582,24 @@ try {
       firebaseReady = true;
       const fbData = snapshot.val() || {};
       firebaseCache = fbData;
-      // Sync to localStorage as backup
+      // Sync Firebase → localStorage, but also push local-only data → Firebase
       Object.keys(fbData).forEach(key => {
         try { localStorage.setItem(key, JSON.stringify(fbData[key])); } catch(e) {}
       });
+      // Push any local data that Firebase doesn't have (e.g. if Firebase write failed before)
+      for (let i = 0; i < DAYS; i++) {
+        const key = getKey(i);
+        if (!fbData[key]) {
+          const local = localStorage.getItem(key);
+          if (local) {
+            try {
+              const localData = migrateData(JSON.parse(local));
+              db.ref('days/' + key).set(localData).catch(() => {});
+              firebaseCache[key] = localData;
+            } catch(e) {}
+          }
+        }
+      }
       updateSyncStatus();
       // Only re-render if user isn't actively typing (prevents losing in-progress input)
       const active = document.activeElement;
@@ -638,13 +652,13 @@ const DAILY_MEDS = [
   { time: '~06:30', name: 'Breakfast', dose: 'Small amount, special diet', note: '', type: 'meal' },
   { time: '08:00', name: 'Optix Care', dose: 'Eye lubricant — both eyes', note: '', type: 'eye' },
   { time: '08:00', name: 'Dorzolamide AM (BLUE cap)', dose: 'Eye drops — RIGHT EYE ONLY', note: '', type: 'eye' },
-  { time: '08:00', name: 'Neomycin/Neopolydex AM (small tube)', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
+  { time: '08:00', name: 'Neomycin-Neopolydex AM (small tube)', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
   { time: '14:00', name: 'Metoclopramide', dose: '1/4 tab (1.25mg)', note: 'Prokinetic — every 8hrs', type: 'scheduled' },
   { time: '14:00', name: 'Probiotic Capsule', dose: '1 capsule', note: 'Daily through ~3/22', type: 'scheduled', endDay: 10 },
   { time: '18:00', name: 'Metronidazole', dose: '1/4 tab (62.5mg)', note: 'Antibiotic — give WITH food', type: 'scheduled' },
   { time: '~18:30', name: 'Dinner', dose: 'Small amount, special diet', note: '', type: 'meal' },
   { time: '20:00', name: 'Dorzolamide PM (BLUE cap)', dose: 'Eye drops — BOTH EYES', note: '', type: 'eye' },
-  { time: '20:00', name: 'Neomycin/Neopolydex PM (small tube)', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
+  { time: '20:00', name: 'Neomycin-Neopolydex PM (small tube)', dose: 'Eye drops — LEFT EYE ONLY', note: '', type: 'eye' },
   { time: '20:00', name: 'Optix Care PM', dose: 'Eye lubricant — both eyes', note: 'After evening eye meds', type: 'eye' },
   { time: '22:00', name: 'Metoclopramide', dose: '1/4 tab (1.25mg)', note: 'Prokinetic — every 8hrs', type: 'scheduled' },
 ];
@@ -810,6 +824,12 @@ function shortDate(d) {
 // localStorage
 function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
 
+// Sanitize med key for Firebase compatibility (no / . $ # [ ] in keys)
+function medKey(type, name, time) {
+  const safe = `${type}_${name}_${time}`.replace(/[\/\.\$\#\[\]]/g, '-');
+  return safe;
+}
+
 // Firebase converts JS arrays to objects with numeric keys — convert them back
 function ensureArray(val) {
   if (Array.isArray(val)) return val;
@@ -841,22 +861,37 @@ function migrateData(data) {
   data.vomits.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   data.symptoms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   if (!data.meds) data.meds = {};
-  // Migrate med keys after eye med rename (added bottle/tube identifiers)
+  if (!data.medLog) data.medLog = {};
+  // Migrate med keys: old names → new names, and sanitize / in keys for Firebase
   const medKeyRenames = {
     'eye_Dorzolamide AM_08:00': 'eye_Dorzolamide AM (BLUE cap)_08:00',
     'eye_Dorzolamide PM_20:00': 'eye_Dorzolamide PM (BLUE cap)_20:00',
-    'eye_Neomycin (Neopolydex) AM_08:00': 'eye_Neomycin/Neopolydex AM (small tube)_08:00',
-    'eye_Neomycin (Neopolydex) PM_20:00': 'eye_Neomycin/Neopolydex PM (small tube)_20:00',
+    'eye_Neomycin (Neopolydex) AM_08:00': 'eye_Neomycin-Neopolydex AM (small tube)_08:00',
+    'eye_Neomycin (Neopolydex) PM_20:00': 'eye_Neomycin-Neopolydex PM (small tube)_20:00',
+    'eye_Neomycin-Neopolydex AM (small tube)_08:00': 'eye_Neomycin-Neopolydex AM (small tube)_08:00',
+    'eye_Neomycin-Neopolydex PM (small tube)_20:00': 'eye_Neomycin-Neopolydex PM (small tube)_20:00',
     'eye_Bromfenac Sodium_PM': 'eye_Bromfenac Sodium (GREY cap)_PM',
     'eye_Difluprednate Ophthalmic_PM': 'eye_Difluprednate Ophthalmic (PINK cap)_PM',
   };
   let medsMigrated = false;
+  // Also sanitize any remaining keys with Firebase-illegal characters
+  Object.keys(data.meds).forEach(k => {
+    const safe = k.replace(/[\/\.\$\#\[\]]/g, '-');
+    if (safe !== k) {
+      data.meds[safe] = data.meds[k];
+      delete data.meds[k];
+      if (data.medLog[k]) {
+        data.medLog[safe] = data.medLog[k];
+        delete data.medLog[k];
+      }
+      medsMigrated = true;
+    }
+  });
   Object.keys(medKeyRenames).forEach(oldKey => {
     if (data.meds[oldKey] !== undefined) {
       data.meds[medKeyRenames[oldKey]] = data.meds[oldKey];
       delete data.meds[oldKey];
-      if (data.medLog && data.medLog[oldKey]) {
-        if (!data.medLog) data.medLog = {};
+      if (data.medLog[oldKey]) {
         data.medLog[medKeyRenames[oldKey]] = data.medLog[oldKey];
         delete data.medLog[oldKey];
       }
@@ -925,7 +960,7 @@ function getDayProgress(dayIdx) {
   const meds = getMedsForDay(dayIdx);
   const scheduled = meds.filter(m => m.type === 'scheduled' || m.type === 'injection' || m.type === 'eye');
   if (!scheduled.length) return 0;
-  const done = scheduled.filter(m => data.meds[`${m.type}_${m.name}_${m.time}`]).length;
+  const done = scheduled.filter(m => data.meds[medKey(m.type, m.name, m.time)]).length;
   return done / scheduled.length;
 }
 
@@ -962,7 +997,7 @@ function renderSummary() {
   const data = loadDay(currentDay);
   const meds = getMedsForDay(currentDay);
   const scheduledMeds = meds.filter(m => m.type === 'scheduled' || m.type === 'injection' || m.type === 'eye');
-  const checkedCount = scheduledMeds.filter((m, idx) => data.meds[`${m.type}_${m.name}_${m.time}`]).length;
+  const checkedCount = scheduledMeds.filter((m, idx) => data.meds[medKey(m.type, m.name, m.time)]).length;
   const bar = document.getElementById('summaryBar');
   const medPct = scheduledMeds.length ? Math.round((checkedCount / scheduledMeds.length) * 100) : 0;
   bar.innerHTML = `
@@ -978,6 +1013,7 @@ function renderSummary() {
 
 // Main render
 function render() {
+  try {
   renderNav();
   renderSummary();
   const container = document.getElementById('dayContent');
@@ -1005,7 +1041,7 @@ function render() {
   const prn = meds.filter(m => m.type === 'prn');
 
   function medRow(m) {
-    const key = `${m.type}_${m.name}_${m.time}`;
+    const key = medKey(m.type, m.name, m.time);
     const checked = data.meds[key] || false;
     const log = (data.medLog && data.medLog[key]) || null;
     const cls = m.type === 'injection' ? 'injection' : m.type === 'prn' ? 'prn' : m.type === 'eye' ? 'eye' : m.type === 'meal' ? '' : '';
@@ -1133,6 +1169,11 @@ function render() {
   `;
 
   container.innerHTML = html;
+  } catch(e) {
+    console.error('Render error:', e);
+    const container = document.getElementById('dayContent');
+    if (container) container.innerHTML = '<div style="padding:20px;color:red;font-weight:bold;">Error rendering page: ' + esc(e.message) + '<br>Please try refreshing. If the problem persists, use Export JSON to back up your data.</div>';
+  }
 }
 
 function bmEntryHTML(dayIdx, i, bm) {
@@ -1750,7 +1791,7 @@ function generateVetReport() {
     const d = getDayDate(i);
     const meds = getMedsForDay(i);
     const scheduled = meds.filter(m => m.type === 'scheduled' || m.type === 'injection' || m.type === 'eye');
-    const done = scheduled.filter(m => data.meds[`${m.type}_${m.name}_${m.time}`]).length;
+    const done = scheduled.filter(m => data.meds[medKey(m.type, m.name, m.time)]).length;
     const syms = Array.isArray(data.symptoms) ? data.symptoms : [];
     const lastObs = syms.length ? syms[syms.length - 1] : {};
     const vomitCount = (data.vomits || []).length;
@@ -1783,12 +1824,12 @@ function generateVetReport() {
     html += `<h2>Day ${i+1} — ${dateStr}</h2>`;
 
     // Medications
-    const givenMeds = meds.filter(m => data.meds[`${m.type}_${m.name}_${m.time}`]);
-    const missedMeds = meds.filter(m => !data.meds[`${m.type}_${m.name}_${m.time}`] && m.type !== 'prn' && m.type !== 'meal');
+    const givenMeds = meds.filter(m => data.meds[medKey(m.type, m.name, m.time)]);
+    const missedMeds = meds.filter(m => !data.meds[medKey(m.type, m.name, m.time)] && m.type !== 'prn' && m.type !== 'meal');
     if (givenMeds.length || missedMeds.length) {
       html += `<table><tr><th>Time</th><th>Medication</th><th>Dose</th><th>Status</th><th>By</th></tr>`;
       givenMeds.forEach(m => {
-        const log = (data.medLog && data.medLog[`${m.type}_${m.name}_${m.time}`]) || {};
+        const log = (data.medLog && data.medLog[medKey(m.type, m.name, m.time)]) || {};
         html += `<tr><td>${m.time}</td><td>${m.name}</td><td>${m.dose}</td><td>Given</td><td>${esc(log.by || '')} ${log.at || ''}</td></tr>`;
       });
       missedMeds.forEach(m => {
