@@ -625,11 +625,13 @@ try {
 }
 
 // Sync status indicator
+let lastSyncTime = null;
 function updateSyncStatus() {
   const el = document.getElementById('syncStatus');
   if (!el) return;
   if (firebaseReady) {
-    el.innerHTML = '🟢 Synced';
+    lastSyncTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    el.innerHTML = `🟢 Synced ${lastSyncTime}`;
     el.style.color = 'var(--accent)';
   } else {
     el.innerHTML = '🔴 Offline (local only)';
@@ -927,8 +929,15 @@ function saveDay(dayIdx, data) {
   }
   // Sync to Firebase
   if (firebaseReady && db) {
-    db.ref('days/' + key).set(data).catch(err => {
+    db.ref('days/' + key).set(data).then(() => {
+      updateSyncStatus();
+    }).catch(err => {
       console.warn('Firebase write failed:', err.message);
+      const el = document.getElementById('syncStatus');
+      if (el) {
+        el.innerHTML = '⚠️ Sync failed';
+        el.style.color = 'var(--warning)';
+      }
     });
   }
   showSaveToast();
