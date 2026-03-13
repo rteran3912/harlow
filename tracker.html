@@ -465,8 +465,7 @@
     .report-content th { background: #eee !important; }
     body { padding: 0; max-width: 100%; color: #000; }
     .report-content .report-photos img { width: 100px; height: 100px; border: 1px solid #000; }
-    @page { size: letter; margin: 0.5in; }
-    @page { @top-center { content: "Harlow Teran | Wire Fox Terrier | 6.1kg | IBD/AHDS Recovery"; font-size: 9px; } }
+    @page { size: letter landscape; margin: 0.4in; }
   }
 
   @media (max-width: 600px) {
@@ -1835,18 +1834,12 @@ function generateVetReport() {
 
     // Bowel Movements
     if (data.bms.length) {
-      html += `<table><tr><th>Time</th><th>Consistency</th><th>Color</th><th>Blood</th><th>By</th><th>Notes</th></tr>`;
-      data.bms.forEach(bm => {
-        html += `<tr><td>${bm.time || '--'}</td><td>${bm.consistency ? bm.consistency + '/7' : '--'}</td><td>${bm.color || '--'}</td><td>${bm.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(bm.loggedBy || '')}</td><td>${esc(bm.notes)}</td></tr>`;
+      html += `<table><tr><th>Time</th><th>Consistency</th><th>Color</th><th>Blood</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
+      data.bms.forEach((bm, bi) => {
+        const photos = (bm.photos && bm.photos.length) ? bm.photos.map(p => `<img src="${esc(p)}" alt="BM #${bi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        html += `<tr><td>${bm.time || '--'}</td><td>${bm.consistency ? bm.consistency + '/7' : '--'}</td><td>${bm.color || '--'}</td><td>${bm.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(bm.loggedBy || '')}</td><td>${esc(bm.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
-      data.bms.forEach((bm, bi) => {
-        if (bm.photos && bm.photos.length) {
-          html += `<div class="report-photos">`;
-          bm.photos.forEach(p => { html += `<img src="${esc(p)}" alt="BM Day ${i+1} #${bi+1}">`; });
-          html += `</div>`;
-        }
-      });
     }
 
     // Meals
@@ -1860,51 +1853,33 @@ function generateVetReport() {
 
     // Vomiting
     if (data.vomits && data.vomits.length) {
-      html += `<table><tr><th>Time</th><th>Amount</th><th>Contents</th><th>Blood</th><th>By</th><th>Notes</th></tr>`;
-      data.vomits.forEach(v => {
-        html += `<tr><td>${v.time || '--'}</td><td>${v.amount || '--'}</td><td>${v.contents || '--'}</td><td>${v.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(v.loggedBy || '')}</td><td>${esc(v.notes)}</td></tr>`;
+      html += `<table><tr><th>Time</th><th>Amount</th><th>Contents</th><th>Blood</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
+      data.vomits.forEach((v, vi) => {
+        const photos = (v.photos && v.photos.length) ? v.photos.map(p => `<img src="${esc(p)}" alt="Vomit #${vi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        html += `<tr><td>${v.time || '--'}</td><td>${v.amount || '--'}</td><td>${v.contents || '--'}</td><td>${v.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(v.loggedBy || '')}</td><td>${esc(v.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
-      data.vomits.forEach((v, vi) => {
-        if (v.photos && v.photos.length) {
-          html += `<div class="report-photos">`;
-          v.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Vomit Day ${i+1} #${vi+1}">`; });
-          html += `</div>`;
-        }
-      });
     }
 
     // Urination
     if (data.urinations && data.urinations.length) {
-      html += `<table><tr><th>Time</th><th>Amount</th><th>Color</th><th>By</th><th>Notes</th></tr>`;
-      data.urinations.forEach(u => {
-        html += `<tr><td>${u.time || '--'}</td><td>${u.amount || '--'}</td><td>${u.color || '--'}</td><td>${esc(u.loggedBy || '')}</td><td>${esc(u.notes)}</td></tr>`;
+      html += `<table><tr><th>Time</th><th>Amount</th><th>Color</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
+      data.urinations.forEach((u, ui) => {
+        const photos = (u.photos && u.photos.length) ? u.photos.map(p => `<img src="${esc(p)}" alt="Urine #${ui+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        html += `<tr><td>${u.time || '--'}</td><td>${u.amount || '--'}</td><td>${u.color || '--'}</td><td>${esc(u.loggedBy || '')}</td><td>${esc(u.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
-      data.urinations.forEach((u, ui) => {
-        if (u.photos && u.photos.length) {
-          html += `<div class="report-photos">`;
-          u.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Urine Day ${i+1} #${ui+1}">`; });
-          html += `</div>`;
-        }
-      });
     }
 
     // Symptoms
     const symsReport = Array.isArray(data.symptoms) ? data.symptoms : [];
     if (symsReport.length) {
-      html += `<table><tr><th>Time</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Water</th><th>By</th><th>Notes</th></tr>`;
+      html += `<table><tr><th>Time</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Water</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
       symsReport.forEach((obs, si) => {
-        html += `<tr><td>${obs.time || '--'}</td><td>${obs.energy || '--'}/5</td><td>${obs.appetite || '--'}</td><td>${obs.pain || 'None'}</td><td>${obs.water || '--'}</td><td>${esc(obs.loggedBy || '')}</td><td>${esc(obs.notes || '')}</td></tr>`;
+        const photos = (obs.photos && obs.photos.length) ? obs.photos.map(p => `<img src="${esc(p)}" alt="Obs #${si+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        html += `<tr><td>${obs.time || '--'}</td><td>${obs.energy || '--'}/5</td><td>${obs.appetite || '--'}</td><td>${obs.pain || 'None'}</td><td>${obs.water || '--'}</td><td>${esc(obs.loggedBy || '')}</td><td>${esc(obs.notes || '')}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
-      symsReport.forEach((obs, si) => {
-        if (obs.photos && obs.photos.length) {
-          html += `<div class="report-photos">`;
-          obs.photos.forEach(p => { html += `<img src="${esc(p)}" alt="Observation Day ${i+1} #${si+1}">`; });
-          html += `</div>`;
-        }
-      });
     }
 
     if (data.notes) {
