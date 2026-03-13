@@ -1210,7 +1210,7 @@ function bmEntryHTML(dayIdx, i, bm) {
       </div>
       <div style="grid-column:1/-1;" class="photo-capture">
         <label class="photo-btn" for="bm-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
-        <input type="file" id="bm-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'bm', ${i}, this)">
+        <input type="file" id="bm-photo-${dayIdx}-${i}" accept="image/*" onchange="addPhoto(${dayIdx}, 'bm', ${i}, this)">
         <div class="photo-grid">
           ${(bm.photos || []).map((p, pi) => `
             <div class="photo-thumb">
@@ -1383,7 +1383,7 @@ function urineEntryHTML(dayIdx, i, u) {
       </div>
       <div style="grid-column:1/-1;" class="photo-capture">
         <label class="photo-btn" for="urine-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
-        <input type="file" id="urine-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'urine', ${i}, this)">
+        <input type="file" id="urine-photo-${dayIdx}-${i}" accept="image/*" onchange="addPhoto(${dayIdx}, 'urine', ${i}, this)">
         <div class="photo-grid">
           ${(u.photos || []).map((p, pi) => `
             <div class="photo-thumb">
@@ -1469,7 +1469,7 @@ function vomitEntryHTML(dayIdx, i, v) {
       </div>
       <div style="grid-column:1/-1;" class="photo-capture">
         <label class="photo-btn" for="vomit-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
-        <input type="file" id="vomit-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'vomit', ${i}, this)">
+        <input type="file" id="vomit-photo-${dayIdx}-${i}" accept="image/*" onchange="addPhoto(${dayIdx}, 'vomit', ${i}, this)">
         <div class="photo-grid">
           ${(v.photos || []).map((p, pi) => `
             <div class="photo-thumb">
@@ -1628,7 +1628,7 @@ function symptomEntryHTML(dayIdx, i, obs) {
       </div>
       <div style="grid-column:1/-1;" class="photo-capture">
         <label class="photo-btn" for="symptom-photo-${dayIdx}-${i}">📷 Take/Add Photo</label>
-        <input type="file" id="symptom-photo-${dayIdx}-${i}" accept="image/*" capture="environment" onchange="addPhoto(${dayIdx}, 'symptom', ${i}, this)">
+        <input type="file" id="symptom-photo-${dayIdx}-${i}" accept="image/*" onchange="addPhoto(${dayIdx}, 'symptom', ${i}, this)">
         <div class="photo-grid">
           ${(obs.photos || []).map((p, pi) => `
             <div class="photo-thumb">
