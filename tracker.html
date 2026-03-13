@@ -582,19 +582,18 @@ try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
 
-    // Listen for real-time changes from Firebase
-    db.ref('days').on('value', (snapshot) => {
-      firebaseReady = true;
-      const fbData = snapshot.val() || {};
-      firebaseCache = fbData;
-      // Sync Firebase → localStorage, but also push local-only data → Firebase
-      Object.keys(fbData).forEach(key => {
-        try { localStorage.setItem(key, JSON.stringify(fbData[key])); } catch(e) {}
-      });
-      // Push any local data that Firebase doesn't have (e.g. if Firebase write failed before)
-      for (let i = 0; i < DAYS; i++) {
-        const key = getKey(i);
-        if (!fbData[key]) {
+    // Listen for per-day changes (much lighter than downloading all days at once)
+    firebaseReady = true;
+    updateSyncStatus();
+    for (let i = 0; i < 14; i++) {
+      const key = getKey(i);
+      db.ref('days/' + key).on('value', (snapshot) => {
+        const val = snapshot.val();
+        if (val) {
+          firebaseCache[key] = val;
+          try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+        } else {
+          // Firebase has no data for this day — push local data if we have it
           const local = localStorage.getItem(key);
           if (local) {
             try {
@@ -604,16 +603,19 @@ try {
             } catch(e) {}
           }
         }
-      }
-      updateSyncStatus();
-      // Only re-render if user isn't actively typing (prevents losing in-progress input)
-      const active = document.activeElement;
-      if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' && active.tagName !== 'SELECT')) {
-        render();
-      }
-    }, (err) => {
-      console.warn('Firebase offline, using localStorage:', err.message);
-      firebaseReady = false;
+        updateSyncStatus();
+        // Re-render if not actively typing
+        const active = document.activeElement;
+        if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' && active.tagName !== 'SELECT')) {
+          render();
+        }
+      }, (err) => {
+        console.warn('Firebase listener error for ' + key + ':', err.message);
+      });
+    }
+    // Mark offline if connection drops
+    db.ref('.info/connected').on('value', (snap) => {
+      firebaseReady = snap.val() === true;
       updateSyncStatus();
     });
   } else {
@@ -1530,7 +1532,7 @@ function addPhoto(dayIdx, type, entryIdx, input) {
     const img = new Image();
     img.onload = function() {
       const canvas = document.createElement('canvas');
-      const maxSize = 800;
+      const maxSize = 400;
       let w = img.width, h = img.height;
       if (w > maxSize || h > maxSize) {
         if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
@@ -1539,7 +1541,7 @@ function addPhoto(dayIdx, type, entryIdx, input) {
       canvas.width = w;
       canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const compressed = canvas.toDataURL('image/jpeg', 0.6);
+      const compressed = canvas.toDataURL('image/jpeg', 0.4);
       const data = loadDay(dayIdx);
       if (type === 'bm' && data.bms[entryIdx]) {
         if (!data.bms[entryIdx].photos) data.bms[entryIdx].photos = [];
