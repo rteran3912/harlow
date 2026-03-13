@@ -664,25 +664,47 @@ function shortDate(d) {
 // localStorage
 function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
 
-function migrateSymptoms(data) {
-  if (data.symptoms && !Array.isArray(data.symptoms)) {
+// Firebase converts JS arrays to objects with numeric keys — convert them back
+function ensureArray(val) {
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === 'object') return Object.values(val);
+  return [];
+}
+
+function migrateData(data) {
+  // Fix Firebase array-to-object conversion for all array fields
+  data.bms = ensureArray(data.bms);
+  data.meals = ensureArray(data.meals);
+  data.urinations = ensureArray(data.urinations);
+  data.vomits = ensureArray(data.vomits);
+  // Migrate old single-object symptoms to array format
+  if (data.symptoms && !Array.isArray(data.symptoms) && typeof data.symptoms === 'object') {
     const old = data.symptoms;
+    // Check if it's an old-format single object (has energy/pain/etc) vs Firebase numeric-keyed object
     if (old.energy || old.pain || old.water || old.appetite || old.observedTime) {
       data.symptoms = [{ time: old.observedTime || '', energy: old.energy || 3, appetite: old.appetite || '', pain: old.pain || '', water: old.water || 'normal', loggedBy: '' }];
     } else {
-      data.symptoms = [];
+      data.symptoms = Object.values(old);
     }
   }
   if (!Array.isArray(data.symptoms)) data.symptoms = [];
+  // Ensure photo arrays inside entries are also real arrays
+  data.bms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
+  data.meals.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
+  data.urinations.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
+  data.vomits.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
+  data.symptoms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
+  if (!data.meds) data.meds = {};
+  if (!data.notes) data.notes = '';
   return data;
 }
 
 function loadDay(dayIdx) {
   const key = getKey(dayIdx);
   // Prefer Firebase cache, fall back to localStorage
-  if (firebaseCache[key]) return migrateSymptoms(JSON.parse(JSON.stringify(firebaseCache[key])));
+  if (firebaseCache[key]) return migrateData(JSON.parse(JSON.stringify(firebaseCache[key])));
   const raw = localStorage.getItem(key);
-  if (raw) return migrateSymptoms(JSON.parse(raw));
+  if (raw) return migrateData(JSON.parse(raw));
   return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
 }
 
