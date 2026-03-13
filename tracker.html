@@ -918,6 +918,8 @@ function showSaveToast() {
 
 function saveDay(dayIdx, data) {
   const key = getKey(dayIdx);
+  // Update local cache immediately so render() sees the new data
+  firebaseCache[key] = JSON.parse(JSON.stringify(data));
   try {
     localStorage.setItem(key, JSON.stringify(data));
   } catch (e) {
