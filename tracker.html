@@ -830,10 +830,9 @@ function shortDate(d) {
 // localStorage
 function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
 
-// Sanitize med key for Firebase compatibility (no / . $ # [ ] in keys)
+// Sanitize med key: only keep letters, numbers, hyphens, underscores
 function medKey(type, name, time) {
-  const safe = `${type}_${name}_${time}`.replace(/[\/\.\$\#\[\]]/g, '-');
-  return safe;
+  return `${type}_${name}_${time}`.replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
 // Firebase converts JS arrays to objects with numeric keys — convert them back
@@ -868,40 +867,21 @@ function migrateData(data) {
   data.symptoms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   if (!data.meds) data.meds = {};
   if (!data.medLog) data.medLog = {};
-  // Migrate med keys: old names → new names, and sanitize / in keys for Firebase
-  const medKeyRenames = {
-    'eye_Dorzolamide AM_08:00': 'eye_Dorzolamide AM (BLUE cap)_08:00',
-    'eye_Dorzolamide PM_20:00': 'eye_Dorzolamide PM (BLUE cap)_20:00',
-    'eye_Neomycin (Neopolydex) AM_08:00': 'eye_Neomycin-Neopolydex AM (small tube)_08:00',
-    'eye_Neomycin (Neopolydex) PM_20:00': 'eye_Neomycin-Neopolydex PM (small tube)_20:00',
-    'eye_Bromfenac Sodium_PM': 'eye_Bromfenac Sodium (GREY cap)_PM',
-    'eye_Difluprednate Ophthalmic_PM': 'eye_Difluprednate Ophthalmic (PINK cap)_PM',
-  };
+  // Migrate all med keys to the new sanitized format (letters, numbers, - and _ only)
+  // This handles all old key formats from previous versions
   let medsMigrated = false;
-  // Also sanitize any remaining keys with Firebase-illegal characters
-  Object.keys(data.meds).forEach(k => {
-    const safe = k.replace(/[\/\.\$\#\[\]]/g, '-');
-    if (safe !== k) {
-      data.meds[safe] = data.meds[k];
-      delete data.meds[k];
-      if (data.medLog[k]) {
-        data.medLog[safe] = data.medLog[k];
-        delete data.medLog[k];
+  function sanitizeKeys(obj) {
+    Object.keys(obj).forEach(k => {
+      const safe = k.replace(/[^a-zA-Z0-9_-]/g, '');
+      if (safe !== k) {
+        obj[safe] = obj[k];
+        delete obj[k];
+        medsMigrated = true;
       }
-      medsMigrated = true;
-    }
-  });
-  Object.keys(medKeyRenames).forEach(oldKey => {
-    if (data.meds[oldKey] !== undefined) {
-      data.meds[medKeyRenames[oldKey]] = data.meds[oldKey];
-      delete data.meds[oldKey];
-      if (data.medLog[oldKey]) {
-        data.medLog[medKeyRenames[oldKey]] = data.medLog[oldKey];
-        delete data.medLog[oldKey];
-      }
-      medsMigrated = true;
-    }
-  });
+    });
+  }
+  sanitizeKeys(data.meds);
+  sanitizeKeys(data.medLog);
   if (!data.notes) data.notes = '';
   data._migrated = medsMigrated;
   return data;
