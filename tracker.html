@@ -522,35 +522,51 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
-// Firebase setup
-const firebaseConfig = {
-  apiKey: "AIzaSyCdFqgqSCNDEAIdAG7BZx_abdxErWxQ-bw",
-  authDomain: "harlow-tracker.firebaseapp.com",
-  databaseURL: "https://harlow-tracker-default-rtdb.firebaseio.com",
-  projectId: "harlow-tracker",
-  storageBucket: "harlow-tracker.firebasestorage.app",
-  messagingSenderId: "423756647096",
-  appId: "1:423756647096:web:7d1c3e8c3e86b6f558424d"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+// Firebase setup — wrapped in try/catch so app works without Firebase
+let db = null;
 let firebaseReady = false;
 let firebaseCache = {};
 
-// Listen for real-time changes from Firebase
-db.ref('days').on('value', (snapshot) => {
-  firebaseReady = true;
-  const fbData = snapshot.val() || {};
-  firebaseCache = fbData;
-  // Sync to localStorage as backup
-  Object.keys(fbData).forEach(key => {
-    try { localStorage.setItem(key, JSON.stringify(fbData[key])); } catch(e) {}
-  });
-  render();
-}, (err) => {
-  console.warn('Firebase offline, using localStorage:', err.message);
-  firebaseReady = false;
-});
+try {
+  if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+    const firebaseConfig = {
+      apiKey: "AIzaSyCdFqgqSCNDEAIdAG7BZx_abdxErWxQ-bw",
+      authDomain: "harlow-tracker.firebaseapp.com",
+      databaseURL: "https://harlow-tracker-default-rtdb.firebaseio.com",
+      projectId: "harlow-tracker",
+      storageBucket: "harlow-tracker.firebasestorage.app",
+      messagingSenderId: "423756647096",
+      appId: "1:423756647096:web:7d1c3e8c3e86b6f558424d"
+    };
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+
+    // Listen for real-time changes from Firebase
+    db.ref('days').on('value', (snapshot) => {
+      firebaseReady = true;
+      const fbData = snapshot.val() || {};
+      firebaseCache = fbData;
+      // Sync to localStorage as backup
+      Object.keys(fbData).forEach(key => {
+        try { localStorage.setItem(key, JSON.stringify(fbData[key])); } catch(e) {}
+      });
+      updateSyncStatus();
+      // Only re-render if user isn't actively typing (prevents losing in-progress input)
+      const active = document.activeElement;
+      if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' && active.tagName !== 'SELECT')) {
+        render();
+      }
+    }, (err) => {
+      console.warn('Firebase offline, using localStorage:', err.message);
+      firebaseReady = false;
+      updateSyncStatus();
+    });
+  } else {
+    console.warn('Firebase SDK not loaded, using localStorage only');
+  }
+} catch(e) {
+  console.warn('Firebase init failed, using localStorage only:', e.message);
+}
 
 // Sync status indicator
 function updateSyncStatus() {
@@ -564,7 +580,8 @@ function updateSyncStatus() {
     el.style.color = 'var(--warning)';
   }
 }
-setInterval(updateSyncStatus, 3000);
+setTimeout(updateSyncStatus, 2000); // Initial check after Firebase has time to connect
+setInterval(updateSyncStatus, 5000);
 
 const START = new Date(2026, 2, 12); // March 12, 2026
 const DAYS = 14;
@@ -677,7 +694,7 @@ function saveDay(dayIdx, data) {
     alert('Storage full! Try removing old photos to free space. Your latest change may not have saved.');
   }
   // Sync to Firebase
-  if (firebaseReady) {
+  if (firebaseReady && db) {
     db.ref('days/' + key).set(data).catch(err => {
       console.warn('Firebase write failed:', err.message);
     });
@@ -1332,7 +1349,7 @@ function symptomEntryHTML(dayIdx, i, obs) {
           <label>Energy Level</label>
           <div class="range-row">
             <span style="font-size:11px;color:var(--muted);">Low</span>
-            <input type="range" min="1" max="5" value="${obs.energy || 3}" oninput="updateSymptomObs(${dayIdx}, ${i}, 'energy', this.value); this.nextElementSibling.textContent=this.value">
+            <input type="range" min="1" max="5" value="${obs.energy || 3}" oninput="this.nextElementSibling.textContent=this.value" onchange="updateSymptomObs(${dayIdx}, ${i}, 'energy', this.value)">
             <span class="range-val">${obs.energy || 3}</span>
             <span style="font-size:11px;color:var(--muted);">Normal</span>
           </div>
@@ -1427,7 +1444,7 @@ function clearDay() {
   if (confirm(`Clear all data for Day ${currentDay + 1}? This cannot be undone.`)) {
     const key = getKey(currentDay);
     localStorage.removeItem(key);
-    if (firebaseReady) db.ref('days/' + key).remove();
+    if (firebaseReady && db) db.ref('days/' + key).remove();
     delete firebaseCache[key];
     render();
   }
