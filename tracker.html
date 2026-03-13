@@ -467,9 +467,33 @@
     .symptom-grid { grid-template-columns: 1fr; }
     .log-entry { grid-template-columns: 1fr; }
   }
+
+  .save-toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--accent);
+    color: white;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .save-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 </style>
 </head>
 <body>
+
+<div class="save-toast" id="saveToast">Saved</div>
 
 <header>
   <h1>🐾 Harlow's Care Tracker</h1>
@@ -711,6 +735,16 @@ function loadDay(dayIdx) {
   return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
 }
 
+let saveToastTimer = null;
+function showSaveToast() {
+  const toast = document.getElementById('saveToast');
+  if (!toast) return;
+  toast.textContent = firebaseReady ? '✓ Saved & synced' : '✓ Saved locally';
+  toast.classList.add('show');
+  clearTimeout(saveToastTimer);
+  saveToastTimer = setTimeout(() => toast.classList.remove('show'), 1500);
+}
+
 function saveDay(dayIdx, data) {
   const key = getKey(dayIdx);
   try {
@@ -724,6 +758,7 @@ function saveDay(dayIdx, data) {
       console.warn('Firebase write failed:', err.message);
     });
   }
+  showSaveToast();
 }
 
 function dayHasData(dayIdx) {
