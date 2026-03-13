@@ -243,15 +243,21 @@
   .add-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   .remove-btn {
-    background: none;
-    border: none;
+    background: var(--warning-light, #fef2f2);
+    border: 1px solid var(--warning);
     color: var(--warning);
     cursor: pointer;
-    font-size: 16px;
-    padding: 2px 6px;
-    border-radius: 4px;
+    font-size: 18px;
+    font-weight: bold;
+    padding: 4px 10px;
+    border-radius: 6px;
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
-  .remove-btn:hover { background: var(--warning-light); }
+  .remove-btn:hover, .remove-btn:active { background: var(--warning); color: white; }
 
   /* Symptoms */
   .symptom-grid {
