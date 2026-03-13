@@ -157,10 +157,13 @@
     transition: all 0.15s;
     border-left: 4px solid var(--accent);
     min-height: 44px;
+    flex-wrap: wrap;
   }
 
   .med-row:hover { background: #F5F4F2; }
-  .med-row.checked { opacity: 0.4; text-decoration: line-through; background: #F5F4F2; }
+  .med-row.checked { opacity: 0.6; background: #F5F4F2; }
+  .med-row.checked .name, .med-row.checked .dose { text-decoration: line-through; }
+  .med-admin { font-size: 12px; font-weight: 600; color: var(--accent); width: 100%; padding-left: 32px; margin-top: -4px; }
   .med-row .time { width: 70px; font-weight: 600; flex-shrink: 0; font-size: 13px; color: var(--muted); }
   .med-row .name { flex: 1; font-weight: 500; }
   .med-row .dose { color: var(--muted); font-size: 13px; flex-shrink: 0; }
@@ -827,7 +830,7 @@ function render() {
         <span class="name">${icon} ${m.name}</span>
         <span class="dose">${m.dose}</span>
         ${m.note ? `<span class="note">${m.note}</span>` : ''}
-        ${log ? `<span style="font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap;">${esc(log.by)} @ ${log.at}</span>` : ''}
+        ${log ? `<span class="med-admin">✓ Given by ${esc(log.by)} at ${log.at}</span>` : ''}
       </div>
     `;
   }
