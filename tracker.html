@@ -594,8 +594,17 @@ try {
         db.ref('days/' + key).on('value', (snapshot) => {
           const val = snapshot.val();
           if (val) {
-            firebaseCache[key] = val;
-            try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+            // Merge with local data so neither side's entries get lost
+            const localRaw = localStorage.getItem(key);
+            let localData = null;
+            if (localRaw) { try { localData = JSON.parse(localRaw); } catch(e) {} }
+            const merged = localData ? mergeDay(localData, val) : val;
+            firebaseCache[key] = merged;
+            try { localStorage.setItem(key, JSON.stringify(merged)); } catch(e) {}
+            // Push merged version back if it has more data than Firebase
+            if (localData && JSON.stringify(merged) !== JSON.stringify(val)) {
+              db.ref('days/' + key).set(merged).catch(() => {});
+            }
           } else {
             // Firebase has no data for this day — push local data if we have it
             const local = localStorage.getItem(key);
@@ -885,6 +894,48 @@ function shortDate(d) {
 
 // localStorage
 function getKey(dayIdx) { return `harlow_day_${dayIdx}`; }
+
+// Merge two day data objects — combines entries from both instead of overwriting
+function mergeDay(local, remote) {
+  if (!local) return remote;
+  if (!remote) return local;
+  const merged = JSON.parse(JSON.stringify(remote));
+  // Merge meds: keep any checked=true from either side
+  if (local.meds) {
+    if (!merged.meds) merged.meds = {};
+    Object.keys(local.meds).forEach(k => {
+      if (local.meds[k] && !merged.meds[k]) merged.meds[k] = true;
+    });
+  }
+  // Merge medLog: keep logs from both
+  if (local.medLog) {
+    if (!merged.medLog) merged.medLog = {};
+    Object.keys(local.medLog).forEach(k => {
+      if (!merged.medLog[k]) merged.medLog[k] = local.medLog[k];
+    });
+  }
+  // Merge arrays: combine entries, deduplicate by time+loggedBy
+  ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
+    const a = ensureArray(local[field] || []);
+    const b = ensureArray(merged[field] || []);
+    if (a.length && b.length) {
+      // Add entries from local that don't exist in remote (by time+loggedBy)
+      const bKeys = new Set(b.map(e => (e.time || '') + '|' + (e.loggedBy || '')));
+      a.forEach(e => {
+        const k = (e.time || '') + '|' + (e.loggedBy || '');
+        if (!bKeys.has(k)) b.push(e);
+      });
+      merged[field] = b;
+    } else if (a.length) {
+      merged[field] = a;
+    }
+  });
+  // Notes: keep longer
+  if ((local.notes || '').length > (merged.notes || '').length) {
+    merged.notes = local.notes;
+  }
+  return merged;
+}
 
 // Sanitize med key: only keep letters, numbers, hyphens, underscores
 function medKey(type, name, time) {
