@@ -539,7 +539,9 @@
     <option value="Mom">Mom</option>
   </select>
   <span id="syncStatus" style="margin-left:auto;font-size:12px;font-weight:500;">🔄 Connecting...</span>
+  <button onclick="testSync()" style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;">Test Sync</button>
 </div>
+<div id="syncTestResult" style="display:none;padding:8px 16px;margin-bottom:8px;border-radius:6px;font-size:12px;"></div>
 
 <div class="nav" id="dayNav"></div>
 
@@ -655,8 +657,43 @@ function updateSyncStatus() {
     el.style.color = 'var(--warning)';
   }
 }
-setTimeout(updateSyncStatus, 2000); // Initial check after Firebase has time to connect
+setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
+
+const APP_VERSION = 12;
+function testSync() {
+  const box = document.getElementById('syncTestResult');
+  box.style.display = 'block';
+  box.style.background = '#fff3cd';
+  box.style.border = '1px solid #ffc107';
+  box.textContent = 'Testing sync... (v' + APP_VERSION + ')';
+  if (!db) {
+    box.style.background = '#f8d7da';
+    box.textContent = 'FAIL: Firebase not initialized (v' + APP_VERSION + ')';
+    return;
+  }
+  const ts = Date.now();
+  const cg = localStorage.getItem('harlow_caregiver') || 'unknown';
+  db.ref('_syncTest').set({ from: cg, time: ts, version: APP_VERSION }).then(() => {
+    // Now read it back
+    db.ref('_syncTest').once('value').then((snap) => {
+      const val = snap.val();
+      if (val && val.time === ts) {
+        box.style.background = '#d4edda';
+        box.style.border = '1px solid #28a745';
+        box.textContent = 'PASS: Firebase read/write working! v' + APP_VERSION + ' | Last sync test by ' + val.from + ' at ' + new Date(val.time).toLocaleTimeString();
+      } else {
+        box.style.background = '#d4edda';
+        box.style.border = '1px solid #28a745';
+        box.textContent = 'READ OK but data mismatch — last test by ' + (val ? val.from : '?') + ' v' + (val ? val.version : '?');
+      }
+    });
+  }).catch((err) => {
+    box.style.background = '#f8d7da';
+    box.style.border = '1px solid #dc3545';
+    box.textContent = 'FAIL: ' + err.message + ' (v' + APP_VERSION + ')';
+  });
+}
 
 const START = new Date(2026, 2, 12); // March 12, 2026
 const DAYS = 14;
