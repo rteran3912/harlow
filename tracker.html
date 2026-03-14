@@ -582,41 +582,57 @@ try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
 
-    // Listen for per-day changes (much lighter than downloading all days at once)
-    firebaseReady = true;
-    updateSyncStatus();
-    for (let i = 0; i < 14; i++) {
-      const key = getKey(i);
-      db.ref('days/' + key).on('value', (snapshot) => {
-        const val = snapshot.val();
-        if (val) {
-          firebaseCache[key] = val;
-          try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
-        } else {
-          // Firebase has no data for this day — push local data if we have it
-          const local = localStorage.getItem(key);
-          if (local) {
-            try {
-              const localData = migrateData(JSON.parse(local));
-              db.ref('days/' + key).set(localData).catch(() => {});
-              firebaseCache[key] = localData;
-            } catch(e) {}
-          }
-        }
-        updateSyncStatus();
-        // Re-render if not actively typing
-        const active = document.activeElement;
-        if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' && active.tagName !== 'SELECT')) {
-          render();
-        }
-      }, (err) => {
-        console.warn('Firebase listener error for ' + key + ':', err.message);
-      });
-    }
-    // Mark offline if connection drops
-    db.ref('.info/connected').on('value', (snap) => {
-      firebaseReady = snap.val() === true;
+    // Test Firebase access with a simple write/read
+    db.ref('_ping').set(Date.now()).then(() => {
+      firebaseReady = true;
       updateSyncStatus();
+      // Set up per-day listeners
+      for (let i = 0; i < 14; i++) {
+        const key = getKey(i);
+        db.ref('days/' + key).on('value', (snapshot) => {
+          const val = snapshot.val();
+          if (val) {
+            firebaseCache[key] = val;
+            try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+          } else {
+            // Firebase has no data for this day — push local data if we have it
+            const local = localStorage.getItem(key);
+            if (local) {
+              try {
+                const localData = migrateData(JSON.parse(local));
+                db.ref('days/' + key).set(localData).catch(() => {});
+                firebaseCache[key] = localData;
+              } catch(e) {}
+            }
+          }
+          updateSyncStatus();
+          // Re-render if not actively typing
+          const active = document.activeElement;
+          if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA' && active.tagName !== 'SELECT')) {
+            render();
+          }
+        }, (err) => {
+          console.warn('Firebase listener error for ' + key + ':', err.message);
+          firebaseReady = false;
+          const el = document.getElementById('syncStatus');
+          if (el) { el.innerHTML = '🔴 ' + err.message; el.style.color = 'var(--warning)'; }
+        });
+      }
+    }).catch((err) => {
+      firebaseReady = false;
+      const el = document.getElementById('syncStatus');
+      if (el) {
+        el.innerHTML = '🔴 Firebase blocked: ' + err.message;
+        el.style.color = 'var(--warning)';
+        el.style.fontSize = '11px';
+      }
+    });
+    // Track connection state
+    db.ref('.info/connected').on('value', (snap) => {
+      if (snap.val() !== true && firebaseReady) {
+        firebaseReady = false;
+        updateSyncStatus();
+      }
     });
   } else {
     console.warn('Firebase SDK not loaded, using localStorage only');
