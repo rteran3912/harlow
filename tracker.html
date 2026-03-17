@@ -164,7 +164,6 @@
   .med-row.checked { opacity: 0.75; background: #F5F4F2; }
   .med-row.checked .name, .med-row.checked .dose { text-decoration: line-through; }
   .med-admin { font-size: 12px; font-weight: 700; color: #1A6B4E; width: 100%; padding-left: 32px; margin-top: -4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .med-admin input[type="time"] { opacity: 1; width: 110px; padding: 4px 6px; border: 1px solid var(--accent); border-radius: 4px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text); cursor: pointer; }
   .med-row .time { width: 70px; font-weight: 600; flex-shrink: 0; font-size: 13px; color: var(--muted); }
   .med-row .name { flex: 1; font-weight: 500; }
   .med-row .dose { color: var(--muted); font-size: 13px; flex-shrink: 0; }
@@ -670,7 +669,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -1131,7 +1130,25 @@ function render() {
   if (dayIdx <= 4) labels.push('Activity restricted');
   if (dayIdx === 9) labels.push('Last probiotic day');
 
-  let html = `
+  // Check if Cerenia was given previous day for banner alert
+  let cereniaAlert = '';
+  if (dayIdx > 0) {
+    const prevData = loadDay(dayIdx - 1);
+    const prevCereniaKey = Object.keys(prevData.meds || {}).find(k => k.indexOf('Cerenia') !== -1 && prevData.meds[k]);
+    if (prevCereniaKey && prevData.medLog && prevData.medLog[prevCereniaKey]) {
+      const prevLog = prevData.medLog[prevCereniaKey];
+      const prevDate = formatDate(getDayDate(dayIdx - 1));
+      let eligibleMsg = 'same time or later today';
+      if (prevLog.at24) {
+        const [h, m] = prevLog.at24.split(':');
+        const t = new Date(); t.setHours(parseInt(h), parseInt(m));
+        eligibleMsg = 'eligible after ' + t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) + ' today';
+      }
+      cereniaAlert = `<div class="alert" style="background:var(--amber-light);border-color:var(--amber);"><strong style="color:var(--amber);">Cerenia Alert:</strong> Given yesterday (${prevDate}) at ${esc(prevLog.at)}. Max 1x/24hrs — ${eligibleMsg}.</div>`;
+    }
+  }
+
+  let html = cereniaAlert + `
     <div class="section">
       <h2>Day ${dayIdx + 1} — ${formatDate(d)} ${labels.length ? '<span style="font-size:12px;color:var(--warning);">(' + labels.join(' | ') + ')</span>' : ''}</h2>
       <h3>Medications</h3>
@@ -1156,7 +1173,7 @@ function render() {
         <span class="name">${icon} ${m.name}</span>
         <span class="dose">${m.dose}</span>
         ${m.note ? `<span class="note">${m.note}</span>` : ''}
-        ${log ? `<span class="med-admin">✓ Given by ${esc(log.by)} at <input type="time" value="${log.at24 || ''}" onchange="updateMedTime(${dayIdx}, '${key}', this.value)" style="width:100px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;background:var(--bg);" title="Edit administration time">${!log.at24 ? ' (' + esc(log.at) + ')' : ''}</span>` : ''}
+        ${log ? `<span class="med-admin">✓ Given by ${esc(log.by)} at ${esc(log.at)} <button onclick="editMedTime(${dayIdx}, '${key}')" style="padding:2px 8px;border:1px solid var(--accent);border-radius:4px;background:#fff;color:var(--accent);font-size:11px;cursor:pointer;margin-left:4px;">Edit Time</button></span>` : ''}
       </div>
     `;
   }
@@ -1424,6 +1441,32 @@ function toggleMed(dayIdx, key, checked) {
       render();
       return;
     }
+    // Cerenia (max 1x/24hrs) — alert if given previous day with next-eligible time
+    if (key.indexOf('Cerenia') !== -1) {
+      const prevDay = dayIdx - 1;
+      if (prevDay >= 0) {
+        const prevData = loadDay(prevDay);
+        const prevCereniaKey = Object.keys(prevData.meds || {}).find(k => k.indexOf('Cerenia') !== -1 && prevData.meds[k]);
+        if (prevCereniaKey && prevData.medLog && prevData.medLog[prevCereniaKey]) {
+          const prevLog = prevData.medLog[prevCereniaKey];
+          const prevDate = formatDate(getDayDate(prevDay));
+          let eligibleMsg = '';
+          if (prevLog.at24) {
+            const [h, m] = prevLog.at24.split(':');
+            const eligibleTime = new Date(getDayDate(dayIdx));
+            eligibleTime.setHours(parseInt(h), parseInt(m));
+            eligibleMsg = '\n\nEarliest you can give Cerenia today: ' + eligibleTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          } else if (prevLog.at) {
+            eligibleMsg = '\n\nEarliest you can give Cerenia today: ' + prevLog.at + ' (same time or later)';
+          }
+          const proceed = confirm('⚠️ Cerenia was given yesterday (Day ' + (prevDay + 1) + ' — ' + prevDate + ') at ' + (prevLog.at || 'unknown time') + '.\n\nCerenia can only be given once every 24 hours.' + eligibleMsg + '\n\nDo you want to proceed?');
+          if (!proceed) {
+            render();
+            return;
+          }
+        }
+      }
+    }
     // Sub-Q fluids every-other-day check
     if (key.indexOf('SubQFluids') !== -1) {
       const prevDay = dayIdx - 1;
@@ -1459,19 +1502,40 @@ function toggleMed(dayIdx, key, checked) {
   render();
 }
 
-function updateMedTime(dayIdx, key, timeVal) {
+function editMedTime(dayIdx, key) {
   const data = loadDay(dayIdx);
-  if (data.medLog && data.medLog[key]) {
-    data.medLog[key].at24 = timeVal;
-    // Update the display string too
-    if (timeVal) {
-      const [h, m] = timeVal.split(':');
-      const d = new Date();
-      d.setHours(parseInt(h), parseInt(m));
-      data.medLog[key].at = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    }
-    saveDay(dayIdx, data);
+  if (!data.medLog || !data.medLog[key]) return;
+  const current = data.medLog[key].at || '';
+  const input = prompt('Enter the time this medication was given (e.g. 2:30 PM or 14:30):', current);
+  if (input === null) return; // cancelled
+  const trimmed = input.trim();
+  if (!trimmed) return;
+  // Try to parse various time formats
+  let parsed = null;
+  // Try "HH:MM" 24h format
+  const m24 = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    parsed = new Date();
+    parsed.setHours(parseInt(m24[1]), parseInt(m24[2]));
   }
+  // Try "H:MM AM/PM" format
+  const m12 = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm|a|p)$/i);
+  if (m12) {
+    let h = parseInt(m12[1]);
+    const ampm = m12[3].toUpperCase();
+    if (ampm.startsWith('P') && h !== 12) h += 12;
+    if (ampm.startsWith('A') && h === 12) h = 0;
+    parsed = new Date();
+    parsed.setHours(h, parseInt(m12[2]));
+  }
+  if (!parsed) {
+    alert('Could not understand that time format. Please use HH:MM (e.g. 14:30) or H:MM AM/PM (e.g. 2:30 PM).');
+    return;
+  }
+  data.medLog[key].at = parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  data.medLog[key].at24 = parsed.toTimeString().slice(0, 5);
+  saveDay(dayIdx, data);
+  render();
 }
 
 function addBM(dayIdx) {
