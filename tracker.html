@@ -161,9 +161,10 @@
   }
 
   .med-row:hover { background: #F5F4F2; }
-  .med-row.checked { opacity: 0.6; background: #F5F4F2; }
+  .med-row.checked { opacity: 0.75; background: #F5F4F2; }
   .med-row.checked .name, .med-row.checked .dose { text-decoration: line-through; }
-  .med-admin { font-size: 12px; font-weight: 700; color: #1A6B4E; width: 100%; padding-left: 32px; margin-top: -4px; }
+  .med-admin { font-size: 12px; font-weight: 700; color: #1A6B4E; width: 100%; padding-left: 32px; margin-top: -4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .med-admin input[type="time"] { opacity: 1; width: 110px; padding: 4px 6px; border: 1px solid var(--accent); border-radius: 4px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text); cursor: pointer; }
   .med-row .time { width: 70px; font-weight: 600; flex-shrink: 0; font-size: 13px; color: var(--muted); }
   .med-row .name { flex: 1; font-weight: 500; }
   .med-row .dose { color: var(--muted); font-size: 13px; flex-shrink: 0; }
@@ -669,7 +670,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -915,7 +916,7 @@ function mergeDay(local, remote) {
     });
   }
   // Merge arrays: combine entries, deduplicate by time+loggedBy
-  ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
+  ['bms', 'meals', 'urinations', 'vomits', 'symptoms', 'fluids'].forEach(field => {
     const a = ensureArray(local[field] || []);
     const b = ensureArray(merged[field] || []);
     if (a.length && b.length) {
@@ -966,6 +967,7 @@ function migrateData(data) {
     }
   }
   if (!Array.isArray(data.symptoms)) data.symptoms = [];
+  data.fluids = ensureArray(data.fluids || []);
   // Ensure photo arrays inside entries are also real arrays
   data.bms.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
   data.meals.forEach(e => { if (e.photos) e.photos = ensureArray(e.photos); });
@@ -1002,7 +1004,7 @@ function loadDay(dayIdx) {
   } else {
     const raw = localStorage.getItem(key);
     if (raw) data = migrateData(JSON.parse(raw));
-    else return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], notes: '' };
+    else return { meds: {}, bms: [], meals: [], urinations: [], vomits: [], symptoms: [], fluids: [], notes: '' };
   }
   // Persist migration changes so old keys don't stick around
   if (data._migrated) {
@@ -1105,6 +1107,7 @@ function renderSummary() {
     <span class="stat">🚽 <strong>${data.bms.length}</strong></span>
     <span class="stat">🍽 <strong>${data.meals.length}</strong></span>
     <span class="stat">💧 <strong>${(data.urinations||[]).length}</strong></span>
+    <span class="stat">🥤 <strong>${(data.fluids||[]).length}</strong></span>
     <span class="stat">🤢 <strong>${(data.vomits||[]).length}</strong></span>
     <span class="stat">⚡ <strong>${data.symptoms.length ? data.symptoms[data.symptoms.length-1].energy + '/5' : '--'}</strong></span>
     <span class="stat">📋 <strong>${data.symptoms.length}</strong> obs</span>
@@ -1153,7 +1156,7 @@ function render() {
         <span class="name">${icon} ${m.name}</span>
         <span class="dose">${m.dose}</span>
         ${m.note ? `<span class="note">${m.note}</span>` : ''}
-        ${log ? `<span class="med-admin">✓ Given by ${esc(log.by)} at ${log.at}</span>` : ''}
+        ${log ? `<span class="med-admin">✓ Given by ${esc(log.by)} at <input type="time" value="${log.at24 || ''}" onchange="updateMedTime(${dayIdx}, '${key}', this.value)" style="width:100px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;background:var(--bg);" title="Edit administration time">${!log.at24 ? ' (' + esc(log.at) + ')' : ''}</span>` : ''}
       </div>
     `;
   }
@@ -1203,6 +1206,24 @@ function render() {
   html += `
       </div>
       <button class="add-btn" onclick="addMeal(${dayIdx})">+ Add meal entry</button>
+    </div>
+  `;
+
+  // Fluid Intake
+  if (!data.fluids) data.fluids = [];
+  html += `
+    <div class="section">
+      <h2>Fluid Intake</h2>
+      <div class="log-entries" id="fluidEntries">
+  `;
+
+  data.fluids.forEach((f, i) => {
+    html += fluidEntryHTML(dayIdx, i, f);
+  });
+
+  html += `
+      </div>
+      <button class="add-btn" onclick="addFluid(${dayIdx})">+ Add fluid intake</button>
     </div>
   `;
 
@@ -1403,12 +1424,54 @@ function toggleMed(dayIdx, key, checked) {
       render();
       return;
     }
+    // Sub-Q fluids every-other-day check
+    if (key.indexOf('SubQFluids') !== -1) {
+      const prevDay = dayIdx - 1;
+      if (prevDay >= 0) {
+        const prevData = loadDay(prevDay);
+        const prevSubQGiven = Object.keys(prevData.meds || {}).some(k => k.indexOf('SubQFluids') !== -1 && prevData.meds[k]);
+        if (prevSubQGiven) {
+          const prevDate = formatDate(getDayDate(prevDay));
+          alert('⚠️ Sub-Q fluids were already given yesterday (Day ' + (prevDay + 1) + ' — ' + prevDate + ').\n\nSub-Q fluids should only be given every other day (max). Please confirm with your vet before proceeding.');
+          render();
+          return;
+        }
+      }
+      const nextDay = dayIdx + 1;
+      if (nextDay < DAYS) {
+        const nextData = loadDay(nextDay);
+        const nextSubQGiven = Object.keys(nextData.meds || {}).some(k => k.indexOf('SubQFluids') !== -1 && nextData.meds[k]);
+        if (nextSubQGiven) {
+          const nextDate = formatDate(getDayDate(nextDay));
+          alert('⚠️ Sub-Q fluids are already logged for tomorrow (Day ' + (nextDay + 1) + ' — ' + nextDate + ').\n\nSub-Q fluids should only be given every other day (max). Please confirm with your vet before proceeding.');
+          render();
+          return;
+        }
+      }
+    }
     if (!data.medLog) data.medLog = {};
-    data.medLog[key] = { by: cg, at: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) };
+    const now = new Date();
+    const at24 = now.toTimeString().slice(0, 5); // "HH:MM" 24h format for <input type="time">
+    data.medLog[key] = { by: cg, at: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), at24: at24 };
   }
   data.meds[key] = checked;
   saveDay(dayIdx, data);
   render();
+}
+
+function updateMedTime(dayIdx, key, timeVal) {
+  const data = loadDay(dayIdx);
+  if (data.medLog && data.medLog[key]) {
+    data.medLog[key].at24 = timeVal;
+    // Update the display string too
+    if (timeVal) {
+      const [h, m] = timeVal.split(':');
+      const d = new Date();
+      d.setHours(parseInt(h), parseInt(m));
+      data.medLog[key].at = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+    saveDay(dayIdx, data);
+  }
 }
 
 function addBM(dayIdx) {
@@ -1459,6 +1522,79 @@ function removeMeal(dayIdx, i) {
   data.meals.splice(i, 1);
   saveDay(dayIdx, data);
   render();
+}
+
+// Fluid intake tracking
+function fluidEntryHTML(dayIdx, i, f) {
+  return `
+    <div class="log-entry">
+      <div class="field-group">
+        <label>Time</label>
+        <input type="time" value="${f.time || ''}" onchange="updateFluid(${dayIdx}, ${i}, 'time', this.value)">
+      </div>
+      <div class="fields">
+        <div class="field-group">
+          <label>Fluid Type</label>
+          <select onchange="updateFluid(${dayIdx}, ${i}, 'type', this.value)">
+            <option value="" ${!f.type ? 'selected' : ''}>--</option>
+            <option value="bone-broth" ${f.type==='bone-broth' ? 'selected' : ''}>Bone Broth</option>
+            <option value="water" ${f.type==='water' ? 'selected' : ''}>Water</option>
+            <option value="electrolyte" ${f.type==='electrolyte' ? 'selected' : ''}>Electrolyte Water</option>
+            <option value="ice-chips" ${f.type==='ice-chips' ? 'selected' : ''}>Ice Chips</option>
+            <option value="other" ${f.type==='other' ? 'selected' : ''}>Other</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Offered</label>
+          <input type="text" value="${esc(f.offered)}" placeholder="e.g. 1/4 cup" style="width:90px;" onchange="updateFluid(${dayIdx}, ${i}, 'offered', this.value)">
+        </div>
+        <div class="field-group">
+          <label>Consumed</label>
+          <select onchange="updateFluid(${dayIdx}, ${i}, 'consumed', this.value)">
+            <option value="" ${!f.consumed ? 'selected' : ''}>--</option>
+            <option value="all" ${f.consumed==='all' ? 'selected' : ''}>All</option>
+            <option value="most" ${f.consumed==='most' ? 'selected' : ''}>Most</option>
+            <option value="some" ${f.consumed==='some' ? 'selected' : ''}>Some</option>
+            <option value="little" ${f.consumed==='little' ? 'selected' : ''}>Little</option>
+            <option value="none" ${f.consumed==='none' ? 'selected' : ''}>Refused</option>
+          </select>
+        </div>
+        <button class="remove-btn" onclick="removeFluid(${dayIdx}, ${i})" title="Remove">×</button>
+        ${f.loggedBy ? `<span style="font-size:11px;color:var(--muted);">— ${esc(f.loggedBy)}</span>` : ''}
+      </div>
+      <div style="grid-column:1/-1;">
+        <textarea style="width:100%;min-height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg);" placeholder="Notes (interest level, method of offering, etc.)..." onchange="updateFluid(${dayIdx}, ${i}, 'notes', this.value)">${esc(f.notes || '')}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function addFluid(dayIdx) {
+  const cg = getCaregiver();
+  if (!cg) { alert('Please select a caregiver before logging.'); return; }
+  const data = loadDay(dayIdx);
+  if (!data.fluids) data.fluids = [];
+  data.fluids.push({ time: '', type: '', offered: '', consumed: '', notes: '', loggedBy: cg });
+  saveDay(dayIdx, data);
+  render();
+}
+
+function updateFluid(dayIdx, i, field, value) {
+  const data = loadDay(dayIdx);
+  if (data.fluids && data.fluids[i]) {
+    data.fluids[i][field] = value;
+    saveDay(dayIdx, data);
+  }
+}
+
+function removeFluid(dayIdx, i) {
+  if (!confirm('Remove this fluid intake entry? This cannot be undone.')) return;
+  const data = loadDay(dayIdx);
+  if (data.fluids) {
+    data.fluids.splice(i, 1);
+    saveDay(dayIdx, data);
+    render();
+  }
 }
 
 // Urine tracking
@@ -1884,7 +2020,7 @@ function generateVetReport() {
 
   // TREND SUMMARY TABLE
   html += `<h2>Recovery Trend Summary</h2>`;
-  html += `<table><tr><th>Date</th><th>Day</th><th>Meds</th><th>BMs</th><th>Meals</th><th>Vomits</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Notes</th></tr>`;
+  html += `<table><tr><th>Date</th><th>Day</th><th>Meds</th><th>BMs</th><th>Meals</th><th>Fluids</th><th>Vomits</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Notes</th></tr>`;
   for (let i = 0; i < DAYS; i++) {
     if (!dayHasData(i)) continue;
     const data = loadDay(i);
@@ -1902,6 +2038,7 @@ function generateVetReport() {
       <td>${done}/${scheduled.length}</td>
       <td>${data.bms.length}</td>
       <td>${data.meals.length}</td>
+      <td>${(data.fluids||[]).length}</td>
       <td>${vomitCount > 0 ? '<strong style="color:red;">' + vomitCount + '</strong>' : '0'}</td>
       <td>${lastObs.energy ? lastObs.energy + '/5' : '--'} ${syms.length > 1 ? '(' + syms.length + ' obs)' : ''}</td>
       <td>${lastObs.appetite || '--'}</td>
@@ -1953,6 +2090,16 @@ function generateVetReport() {
       html += `<table><tr><th>Time</th><th>Food</th><th>Amount</th><th>Eaten</th><th>Kept Down</th><th>By</th></tr>`;
       data.meals.forEach(meal => {
         html += `<tr><td>${meal.time || '--'}</td><td>${esc(meal.food) || '--'}</td><td>${esc(meal.amount) || '--'}</td><td>${meal.eaten || '--'}</td><td>${meal.kept === 'no' ? '<strong>No (vomited)</strong>' : 'Yes'}</td><td>${esc(meal.loggedBy || '')}</td></tr>`;
+      });
+      html += `</table>`;
+    }
+
+    // Fluid Intake
+    if (data.fluids && data.fluids.length) {
+      html += `<table><tr><th>Time</th><th>Type</th><th>Offered</th><th>Consumed</th><th>By</th><th>Notes</th></tr>`;
+      data.fluids.forEach(f => {
+        const typeLabels = {'bone-broth':'Bone Broth','water':'Water','electrolyte':'Electrolyte Water','ice-chips':'Ice Chips','other':'Other'};
+        html += `<tr><td>${f.time || '--'}</td><td>${typeLabels[f.type] || f.type || '--'}</td><td>${esc(f.offered) || '--'}</td><td>${f.consumed || '--'}</td><td>${esc(f.loggedBy || '')}</td><td>${esc(f.notes || '')}</td></tr>`;
       });
       html += `</table>`;
     }
