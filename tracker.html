@@ -670,7 +670,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -2266,9 +2266,28 @@ function emailReport() {
 
 render();
 
-// Service Worker registration for PWA
+// Service Worker registration for PWA — force update check every load
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration failed:', err));
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then(reg => {
+      // Check for updates on every page load
+      reg.update();
+      // When a new SW is waiting, activate it immediately
+      if (reg.waiting) { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); }
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'activated') {
+            window.location.reload();
+          }
+        });
+      });
+    })
+    .catch(err => console.log('SW registration failed:', err));
+  // Listen for the new SW taking over
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
 }
 </script>
 

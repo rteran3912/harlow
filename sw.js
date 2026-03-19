@@ -1,4 +1,4 @@
-const CACHE_NAME = 'harlow-tracker-v8';
+const CACHE_NAME = 'harlow-tracker-v9';
 const URLS_TO_CACHE = [
   '/harlow/tracker.html',
   '/harlow/manifest.json'
@@ -18,6 +18,12 @@ self.addEventListener('activate', event => {
     )
   );
   self.clients.claim();
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', event => {
