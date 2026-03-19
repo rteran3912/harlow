@@ -552,6 +552,7 @@
 
 <div class="actions">
   <button class="btn btn-danger" onclick="clearDay()">Clear Today's Data</button>
+  <button class="btn" onclick="inspectDayData()">Inspect Day Data</button>
   <button class="btn" onclick="exportData()">Export JSON</button>
   <button class="btn btn-primary" onclick="generateVetReport()">Generate Vet Report</button>
 </div>
@@ -670,7 +671,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -2029,6 +2030,34 @@ function clearDay() {
     delete firebaseCache[key];
     render();
   }
+}
+
+function inspectDayData() {
+  const data = loadDay(currentDay);
+  const d = getDayDate(currentDay);
+  const dexDays = getDexDays();
+  const schedule = getDexSchedule();
+  let info = 'DAY ' + (currentDay + 1) + ' — ' + formatDate(d) + ' (index ' + currentDay + ')\n\n';
+  info += 'DEX SCHEDULE: ' + JSON.stringify(schedule) + '\n';
+  info += 'DEX DAYS: [' + dexDays.map(d => d + ' (Day ' + (d+1) + ')').join(', ') + ']\n';
+  info += 'DEX ON THIS DAY: ' + (dexDays.includes(currentDay) ? 'YES' : 'NO') + '\n\n';
+  info += 'MEDS CHECKED:\n';
+  Object.keys(data.meds || {}).forEach(k => {
+    info += '  ' + k + ': ' + (data.meds[k] ? 'YES' : 'no') + '\n';
+  });
+  info += '\nMED LOG:\n';
+  Object.keys(data.medLog || {}).forEach(k => {
+    const log = data.medLog[k];
+    info += '  ' + k + ': by ' + log.by + ' at ' + log.at + ' (at24: ' + (log.at24 || 'none') + ')\n';
+  });
+  info += '\nOTHER DATA:\n';
+  info += '  BMs: ' + (data.bms || []).length + '\n';
+  info += '  Meals: ' + (data.meals || []).length + '\n';
+  info += '  Fluids: ' + (data.fluids || []).length + '\n';
+  info += '  Urinations: ' + (data.urinations || []).length + '\n';
+  info += '  Vomits: ' + (data.vomits || []).length + '\n';
+  info += '  Symptoms: ' + (data.symptoms || []).length + '\n';
+  alert(info);
 }
 
 function exportData() {
