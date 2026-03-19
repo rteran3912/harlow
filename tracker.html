@@ -525,7 +525,8 @@
         <option value="2">Every 2 days (active flare)</option>
         <option value="3">Every 3 days (IBD subsiding)</option>
       </select>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px;">Changing this only affects days from today forward. Past injection days stay locked.</div>
+      <button onclick="resetDexFromToday()" style="padding:4px 10px;border:1px solid var(--accent);border-radius:4px;background:#fff;color:var(--accent);font-size:12px;cursor:pointer;margin-left:6px;">Reset from today</button>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">Changing this only affects days from today forward. Use "Reset from today" if Dex doesn't appear on the expected day.</div>
       <span id="dexSchedulePreview" style="display:block;margin-top:6px;font-size:12px;color:var(--text);white-space:pre-line;"></span>
     </div>
   </div>
@@ -669,7 +670,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -842,6 +843,31 @@ function changeDexFrequency(newFreq) {
   saveDexSchedule(newSchedule);
   updateDexPreview();
   render();
+}
+
+function resetDexFromToday() {
+  const sel = document.getElementById('dexFreqSelect');
+  const freq = parseInt(sel ? sel.value : 3);
+
+  // Find today's day index
+  let todayIdx = 0;
+  const today = new Date();
+  for (let i = 0; i < DAYS; i++) {
+    if (getDayDate(i).toDateString() === today.toDateString()) { todayIdx = i; break; }
+  }
+
+  // Keep past schedule segments, rebuild from today
+  const oldSchedule = getDexSchedule();
+  const pastSegments = oldSchedule.filter(s => s.fromDay < todayIdx);
+
+  // New schedule: keep past as-is, start fresh from today with current freq
+  const newSchedule = pastSegments.length ? pastSegments : [{ fromDay: 0, freq: 2 }];
+  newSchedule.push({ fromDay: todayIdx, freq: freq });
+
+  saveDexSchedule(newSchedule);
+  updateDexPreview();
+  render();
+  alert('Dex schedule reset! Every ' + freq + ' days starting from today (Day ' + (todayIdx + 1) + ').');
 }
 
 function updateDexPreview() {
