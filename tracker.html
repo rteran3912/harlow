@@ -669,7 +669,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -784,15 +784,8 @@ function getDexDays() {
   for (let seg = 0; seg < schedule.length; seg++) {
     const s = schedule[seg];
     const nextFrom = seg < schedule.length - 1 ? schedule[seg + 1].fromDay : DAYS;
-    // Find the first Dex day in this segment
-    let firstDay;
-    if (seg === 0) {
-      firstDay = s.fromDay; // first segment starts at its fromDay
-    } else {
-      // Find last Dex day from previous segments to calculate spacing
-      const lastDex = days.length > 0 ? days[days.length - 1] : s.fromDay - s.freq;
-      firstDay = lastDex + s.freq;
-    }
+    // Each segment starts at its fromDay (the anchor point set when frequency changed)
+    let firstDay = s.fromDay;
     for (let d = firstDay; d < nextFrom && d < DAYS; d += s.freq) {
       days.push(d);
     }
