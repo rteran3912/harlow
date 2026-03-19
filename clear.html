@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><title>Clearing cache...</title></head>
+<body style="font-family:system-ui;padding:40px;text-align:center;">
+<h2>Clearing cache...</h2>
+<p id="status">Working...</p>
+<script>
+async function clearAll() {
+  const s = document.getElementById('status');
+  try {
+    // Unregister all service workers
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const r of regs) { await r.unregister(); }
+    s.textContent = 'Service workers removed: ' + regs.length;
+
+    // Delete all caches
+    const keys = await caches.keys();
+    for (const k of keys) { await caches.delete(k); }
+    s.textContent += '\nCaches deleted: ' + keys.length;
+
+    s.textContent += '\n\nDone! Redirecting in 2 seconds...';
+    setTimeout(() => { window.location.href = 'tracker.html'; }, 2000);
+  } catch(e) {
+    s.textContent = 'Error: ' + e.message;
+  }
+}
+clearAll();
+</script>
+</body>
+</html>
