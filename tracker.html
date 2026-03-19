@@ -669,7 +669,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -812,7 +812,6 @@ function getCurrentDexFreq() {
 
 function changeDexFrequency(newFreq) {
   const schedule = getDexSchedule();
-  const dexDays = getDexDays();
   newFreq = parseInt(newFreq);
 
   // Find today's day index (use actual today, not selected day)
@@ -822,10 +821,21 @@ function changeDexFrequency(newFreq) {
     if (getDayDate(i).toDateString() === today.toDateString()) { todayIdx = i; break; }
   }
 
-  // Find the last Dex day on or before today (these are locked)
-  let lastLockedDex = -1;
-  for (const d of dexDays) {
-    if (d <= todayIdx) lastLockedDex = d;
+  // Find the last day Dex was ACTUALLY GIVEN (not just scheduled)
+  let lastGivenDex = -1;
+  for (let i = todayIdx; i >= 0; i--) {
+    const dayData = loadDay(i);
+    const dexGiven = Object.keys(dayData.meds || {}).some(k => k.indexOf('DexSP') !== -1 && dayData.meds[k]);
+    if (dexGiven) { lastGivenDex = i; break; }
+  }
+
+  // Ask if Dex was given/will be given today (so we can anchor from today)
+  let anchor;
+  if (lastGivenDex === todayIdx) {
+    anchor = todayIdx; // already given today
+  } else {
+    const givenToday = confirm('Did you give (or will you give) Dex SP today?\n\nTap OK to schedule starting from today.\nTap Cancel to schedule starting ' + newFreq + ' days after the last dose.');
+    anchor = givenToday ? todayIdx : (lastGivenDex >= 0 ? lastGivenDex : todayIdx);
   }
 
   // Remove any future schedule segments (from today onward)
@@ -833,9 +843,8 @@ function changeDexFrequency(newFreq) {
   // If no segments remain, keep at least the original
   if (newSchedule.length === 0) newSchedule.push(schedule[0]);
 
-  // Add the new segment starting from the next Dex day after the last locked one
-  const nextDexDay = lastLockedDex >= 0 ? lastLockedDex + newFreq : 2;
-  newSchedule.push({ fromDay: nextDexDay, freq: newFreq });
+  // Anchor the new frequency from the chosen day
+  newSchedule.push({ fromDay: anchor, freq: newFreq });
 
   saveDexSchedule(newSchedule);
   updateDexPreview();
