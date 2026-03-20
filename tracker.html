@@ -567,9 +567,11 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
 // Firebase setup — wrapped in try/catch so app works without Firebase
 let db = null;
+let storage = null;
 let firebaseReady = false;
 let firebaseCache = {};
 
@@ -586,11 +588,14 @@ try {
     };
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
+    storage = firebase.storage();
 
     // Test Firebase access with a simple write/read
     db.ref('_ping').set(Date.now()).then(() => {
       firebaseReady = true;
       updateSyncStatus();
+      // Process any queued offline uploads, then run photo migration
+      setTimeout(() => { processUploadQueue().then(() => migrateExistingPhotos()); }, 3000);
       // Set up per-day listeners
       for (let i = 0; i < 14; i++) {
         const key = getKey(i);
@@ -643,10 +648,18 @@ try {
     });
     // Track connection state
     db.ref('.info/connected').on('value', (snap) => {
-      if (snap.val() !== true && firebaseReady) {
+      if (snap.val() === true) {
+        // Connection restored — process queued uploads
+        processUploadQueue();
+      } else if (firebaseReady) {
         firebaseReady = false;
         updateSyncStatus();
       }
+    });
+
+    // Also process queue when browser comes back online
+    window.addEventListener('online', () => {
+      setTimeout(() => processUploadQueue(), 2000);
     });
   } else {
     console.warn('Firebase SDK not loaded, using localStorage only');
@@ -672,7 +685,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -717,6 +730,14 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = String(s);
   return d.innerHTML;
+}
+
+// Safe photo src — don't esc() Firebase URLs (& becomes &amp; and breaks the token param)
+// Both data: URIs and https:// Storage URLs are programmatically generated, never user input
+function photoSrc(p) {
+  if (!p) return '';
+  if (isStorageURL(p) || p.startsWith('https://')) return p;
+  return esc(p);
 }
 
 // Medication schedule template
@@ -953,7 +974,18 @@ function mergeDay(local, remote) {
       const bKeys = new Set(b.map(e => (e.time || '') + '|' + (e.loggedBy || '')));
       a.forEach(e => {
         const k = (e.time || '') + '|' + (e.loggedBy || '');
-        if (!bKeys.has(k)) b.push(e);
+        if (!bKeys.has(k)) {
+          b.push(e);
+        } else {
+          // For matching entries, prefer the one with more Storage URLs (migrated photos)
+          const bEntry = b.find(be => ((be.time || '') + '|' + (be.loggedBy || '')) === k);
+          if (bEntry && e.photos && bEntry.photos) {
+            const urlCount = arr => (arr || []).filter(p => !p.startsWith('data:')).length;
+            if (urlCount(e.photos) > urlCount(bEntry.photos)) {
+              bEntry.photos = e.photos;
+            }
+          }
+        }
       });
       merged[field] = b;
     } else if (a.length) {
@@ -1398,7 +1430,7 @@ function bmEntryHTML(dayIdx, i, bm) {
         <div class="photo-grid">
           ${(bm.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="BM photo">
+              <img src="${photoSrc(p)}" onclick="showPhoto(this.src)" alt="BM photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'bm', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1733,7 +1765,7 @@ function urineEntryHTML(dayIdx, i, u) {
         <div class="photo-grid">
           ${(u.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Urine photo">
+              <img src="${photoSrc(p)}" onclick="showPhoto(this.src)" alt="Urine photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'urine', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1819,7 +1851,7 @@ function vomitEntryHTML(dayIdx, i, v) {
         <div class="photo-grid">
           ${(v.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Vomit photo">
+              <img src="${photoSrc(p)}" onclick="showPhoto(this.src)" alt="Vomit photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'vomit', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -1857,6 +1889,206 @@ function removeVomit(dayIdx, i) {
   }
 }
 
+// Photo helper: map type shorthand to data field name
+function getEntryForType(data, type, entryIdx) {
+  const map = { bm: 'bms', urine: 'urinations', vomit: 'vomits', symptom: 'symptoms', meal: 'meals' };
+  const field = map[type];
+  return field && data[field] ? data[field][entryIdx] || null : null;
+}
+
+// Check if a photo value is a Firebase Storage URL (not base64)
+function isStorageURL(val) {
+  return val && (val.startsWith('https://firebasestorage.googleapis.com') || val.startsWith('https://storage.googleapis.com'));
+}
+
+// Upload a base64 photo to Firebase Storage, return the download URL
+async function uploadPhotoToStorage(base64Data, dayIdx, type, entryIdx, photoIdx) {
+  if (!storage || !firebaseReady) {
+    queueOfflineUpload(base64Data, dayIdx, type, entryIdx, photoIdx);
+    return base64Data; // Return base64 as fallback
+  }
+  const dayKey = getKey(dayIdx);
+  const timestamp = Date.now();
+  const path = 'photos/' + dayKey + '/' + type + '_' + entryIdx + '_' + photoIdx + '_' + timestamp + '.jpg';
+  const ref = storage.ref(path);
+
+  // Convert base64 to blob
+  const response = await fetch(base64Data);
+  const blob = await response.blob();
+
+  const snapshot = await ref.put(blob, { contentType: 'image/jpeg' });
+  return await snapshot.ref.getDownloadURL();
+}
+
+// IndexedDB offline upload queue
+const IDB_NAME = 'harlow_photo_queue';
+const IDB_STORE = 'pending_uploads';
+
+function openQueueDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = function(e) {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function(e) { reject(e.target.error); };
+  });
+}
+
+async function queueOfflineUpload(base64, dayIdx, type, entryIdx, photoIdx) {
+  try {
+    const idb = await openQueueDB();
+    const tx = idb.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).add({ base64, dayIdx, type, entryIdx, photoIdx, timestamp: Date.now() });
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  } catch(e) {
+    console.warn('Cannot queue photo for offline upload:', e);
+  }
+}
+
+async function processUploadQueue() {
+  if (!storage || !firebaseReady) return;
+  try {
+    const idb = await openQueueDB();
+    const tx = idb.transaction(IDB_STORE, 'readonly');
+    const store = tx.objectStore(IDB_STORE);
+    const items = await new Promise((res, rej) => {
+      const req = store.getAll();
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+    if (items.length === 0) return;
+
+    const idb2 = await openQueueDB();
+    for (const item of items) {
+      try {
+        const url = await uploadPhotoToStorage(item.base64, item.dayIdx, item.type, item.entryIdx, item.photoIdx);
+        if (url !== item.base64) {
+          // Replace base64 in day data with URL
+          const data = loadDay(item.dayIdx);
+          const entry = getEntryForType(data, item.type, item.entryIdx);
+          if (entry && entry.photos) {
+            const idx = entry.photos.indexOf(item.base64);
+            if (idx >= 0) {
+              entry.photos[idx] = url;
+              saveDay(item.dayIdx, data);
+            }
+          }
+          // Remove from queue
+          const delTx = idb2.transaction(IDB_STORE, 'readwrite');
+          delTx.objectStore(IDB_STORE).delete(item.id);
+        }
+      } catch(e) {
+        console.warn('Failed to upload queued photo:', e);
+      }
+    }
+  } catch(e) {
+    console.warn('Error processing upload queue:', e);
+  }
+}
+
+// One-time migration: upload existing base64 photos to Firebase Storage
+const MIGRATION_KEY = 'harlow_photo_migration';
+let migrationRunning = false;
+
+async function migrateExistingPhotos() {
+  if (!storage || !firebaseReady || migrationRunning) return;
+  const progress = JSON.parse(localStorage.getItem(MIGRATION_KEY) || '{}');
+  if (progress.complete) return;
+
+  const fields = ['bms', 'urinations', 'vomits', 'symptoms', 'meals'];
+  const typeMap = { bms: 'bm', urinations: 'urine', vomits: 'vomit', symptoms: 'symptom', meals: 'meal' };
+
+  // Count total base64 photos remaining
+  let totalBase64 = 0;
+  let totalPhotos = 0;
+  for (let d = 0; d < DAYS; d++) {
+    const data = loadDay(d);
+    for (const field of fields) {
+      for (const entry of (data[field] || [])) {
+        for (const p of (entry.photos || [])) {
+          totalPhotos++;
+          if (p.startsWith('data:')) totalBase64++;
+        }
+      }
+    }
+  }
+
+  if (totalBase64 === 0) {
+    localStorage.setItem(MIGRATION_KEY, JSON.stringify({ complete: true }));
+    return;
+  }
+
+  migrationRunning = true;
+  let migrated = 0;
+
+  // Show migration progress overlay
+  showMigrationUI(migrated, totalBase64);
+
+  for (let d = 0; d < DAYS; d++) {
+    const dayKey = 'day_' + d;
+    if (progress[dayKey] === 'done') continue;
+
+    const data = loadDay(d);
+    let dayChanged = false;
+
+    for (const field of fields) {
+      for (let ei = 0; ei < (data[field] || []).length; ei++) {
+        const entry = data[field][ei];
+        if (!entry.photos) continue;
+        for (let pi = 0; pi < entry.photos.length; pi++) {
+          if (!entry.photos[pi].startsWith('data:')) continue;
+          try {
+            const url = await uploadPhotoToStorage(entry.photos[pi], d, typeMap[field], ei, pi);
+            if (url !== entry.photos[pi]) {
+              entry.photos[pi] = url;
+              dayChanged = true;
+              migrated++;
+              showMigrationUI(migrated, totalBase64);
+            }
+          } catch(err) {
+            console.warn('Migration failed for day ' + d + ' ' + field + '[' + ei + '] photo ' + pi + ':', err);
+          }
+        }
+      }
+    }
+
+    if (dayChanged) {
+      saveDay(d, data);
+    }
+    progress[dayKey] = 'done';
+    localStorage.setItem(MIGRATION_KEY, JSON.stringify(progress));
+  }
+
+  progress.complete = true;
+  localStorage.setItem(MIGRATION_KEY, JSON.stringify(progress));
+  migrationRunning = false;
+  hideMigrationUI();
+  render();
+}
+
+function showMigrationUI(done, total) {
+  let el = document.getElementById('migrationOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'migrationOverlay';
+    el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1A6B4E;color:#fff;padding:12px 16px;z-index:10000;font-size:14px;text-align:center;box-shadow:0 -2px 8px rgba(0,0,0,0.2);';
+    document.body.appendChild(el);
+  }
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  el.innerHTML = '📤 Migrating photos to cloud... ' + done + '/' + total + ' (' + pct + '%)' +
+    '<div style="background:rgba(255,255,255,0.3);border-radius:4px;height:6px;margin-top:6px;overflow:hidden;">' +
+    '<div style="background:#fff;height:100%;width:' + pct + '%;border-radius:4px;transition:width 0.3s;"></div></div>';
+}
+
+function hideMigrationUI() {
+  const el = document.getElementById('migrationOverlay');
+  if (el) el.remove();
+}
+
 // Photo functions
 function addPhoto(dayIdx, type, entryIdx, input) {
   const file = input.files[0];
@@ -1876,22 +2108,32 @@ function addPhoto(dayIdx, type, entryIdx, input) {
       canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const compressed = canvas.toDataURL('image/jpeg', 0.4);
+
+      // Save base64 immediately for instant feedback
       const data = loadDay(dayIdx);
-      if (type === 'bm' && data.bms[entryIdx]) {
-        if (!data.bms[entryIdx].photos) data.bms[entryIdx].photos = [];
-        data.bms[entryIdx].photos.push(compressed);
-      } else if (type === 'urine' && data.urinations && data.urinations[entryIdx]) {
-        if (!data.urinations[entryIdx].photos) data.urinations[entryIdx].photos = [];
-        data.urinations[entryIdx].photos.push(compressed);
-      } else if (type === 'vomit' && data.vomits && data.vomits[entryIdx]) {
-        if (!data.vomits[entryIdx].photos) data.vomits[entryIdx].photos = [];
-        data.vomits[entryIdx].photos.push(compressed);
-      } else if (type === 'symptom' && data.symptoms && data.symptoms[entryIdx]) {
-        if (!data.symptoms[entryIdx].photos) data.symptoms[entryIdx].photos = [];
-        data.symptoms[entryIdx].photos.push(compressed);
-      }
+      const entry = getEntryForType(data, type, entryIdx);
+      if (!entry) return;
+      if (!entry.photos) entry.photos = [];
+      const photoIndex = entry.photos.length;
+      entry.photos.push(compressed);
       saveDay(dayIdx, data);
       render();
+
+      // Async upload to Firebase Storage, then replace base64 with URL
+      uploadPhotoToStorage(compressed, dayIdx, type, entryIdx, photoIndex)
+        .then(url => {
+          if (url !== compressed) {
+            const freshData = loadDay(dayIdx);
+            const freshEntry = getEntryForType(freshData, type, entryIdx);
+            if (freshEntry && freshEntry.photos && freshEntry.photos[photoIndex] === compressed) {
+              freshEntry.photos[photoIndex] = url;
+              saveDay(dayIdx, freshData);
+            }
+          }
+        })
+        .catch(err => {
+          console.warn('Photo upload failed, queued for retry:', err.message);
+        });
     };
     img.src = e.target.result;
   };
@@ -1906,18 +2148,24 @@ function showPhoto(src) {
 }
 
 function removePhoto(dayIdx, type, entryIdx, photoIdx) {
+  if (!confirm('Remove this photo? This cannot be undone.')) return;
   const data = loadDay(dayIdx);
-  if (type === 'bm' && data.bms[entryIdx] && data.bms[entryIdx].photos) {
-    data.bms[entryIdx].photos.splice(photoIdx, 1);
-  } else if (type === 'urine' && data.urinations && data.urinations[entryIdx] && data.urinations[entryIdx].photos) {
-    data.urinations[entryIdx].photos.splice(photoIdx, 1);
-  } else if (type === 'vomit' && data.vomits && data.vomits[entryIdx] && data.vomits[entryIdx].photos) {
-    data.vomits[entryIdx].photos.splice(photoIdx, 1);
-  } else if (type === 'symptom' && data.symptoms && data.symptoms[entryIdx] && data.symptoms[entryIdx].photos) {
-    data.symptoms[entryIdx].photos.splice(photoIdx, 1);
-  }
+  const entry = getEntryForType(data, type, entryIdx);
+  if (!entry || !entry.photos) return;
+
+  const photoValue = entry.photos[photoIdx];
+  entry.photos.splice(photoIdx, 1);
   saveDay(dayIdx, data);
   render();
+
+  // If it was a Firebase Storage URL, delete the file from Storage too
+  if (isStorageURL(photoValue)) {
+    try {
+      storage.refFromURL(photoValue).delete().catch(err => {
+        console.warn('Failed to delete photo from storage:', err.message);
+      });
+    } catch(e) {}
+  }
 }
 
 function symptomEntryHTML(dayIdx, i, obs) {
@@ -1978,7 +2226,7 @@ function symptomEntryHTML(dayIdx, i, obs) {
         <div class="photo-grid">
           ${(obs.photos || []).map((p, pi) => `
             <div class="photo-thumb">
-              <img src="${esc(p)}" onclick="showPhoto(this.src)" alt="Observation photo">
+              <img src="${photoSrc(p)}" onclick="showPhoto(this.src)" alt="Observation photo">
               <button class="remove-photo" onclick="removePhoto(${dayIdx}, 'symptom', ${i}, ${pi})">×</button>
             </div>
           `).join('')}
@@ -2062,9 +2310,10 @@ function inspectDayData() {
 }
 
 function manageStorage() {
-  // Calculate storage usage
   let totalBytes = 0;
   let totalPhotos = 0;
+  let cloudPhotos = 0;
+  let localPhotos = 0;
   const dayStats = [];
 
   for (let i = 0; i < DAYS; i++) {
@@ -2072,55 +2321,70 @@ function manageStorage() {
     const raw = localStorage.getItem(key);
     if (!raw) continue;
     const data = JSON.parse(raw);
-    const dayBytes = raw.length * 2; // JS strings are UTF-16
+    const dayBytes = raw.length * 2;
     let photos = 0;
+    let cloud = 0;
+    let local = 0;
     let photoBytes = 0;
 
     ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
       (data[field] || []).forEach(entry => {
         if (entry.photos && entry.photos.length) {
-          photos += entry.photos.length;
-          entry.photos.forEach(p => { photoBytes += (p.length || 0) * 2; });
+          entry.photos.forEach(p => {
+            photos++;
+            photoBytes += (p.length || 0) * 2;
+            if (isStorageURL(p)) cloud++;
+            else local++;
+          });
         }
       });
     });
 
     totalBytes += dayBytes;
     totalPhotos += photos;
+    cloudPhotos += cloud;
+    localPhotos += local;
     if (photos > 0) {
-      dayStats.push({ dayIdx: i, date: formatDate(getDayDate(i)), photos, photoBytes });
+      dayStats.push({ dayIdx: i, date: formatDate(getDayDate(i)), photos, cloud, local, photoBytes });
     }
   }
 
   const usedKB = Math.round(totalBytes / 1024);
-  const maxKB = 5120; // ~5MB localStorage limit
+  const maxKB = 5120;
   const pct = Math.round((usedKB / maxKB) * 100);
+  const migrationProgress = JSON.parse(localStorage.getItem(MIGRATION_KEY) || '{}');
 
   let html = '<h2>Storage Manager</h2>';
   html += `<p><strong>Storage used:</strong> ${usedKB} KB / ~${maxKB} KB (${pct}%)</p>`;
   html += `<div style="background:#eee;border-radius:6px;height:20px;margin:8px 0;overflow:hidden;">`;
   html += `<div style="background:${pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warning)' : 'var(--accent)'};height:100%;width:${Math.min(pct,100)}%;border-radius:6px;"></div></div>`;
-  html += `<p><strong>Total photos:</strong> ${totalPhotos}</p>`;
+  html += `<p><strong>Total photos:</strong> ${totalPhotos} — ☁️ ${cloudPhotos} in cloud, 📱 ${localPhotos} local</p>`;
+
+  if (localPhotos > 0 && !migrationProgress.complete) {
+    html += `<div style="background:#FFF3CD;border:1px solid #F0C36D;border-radius:6px;padding:10px;margin:8px 0;">`;
+    html += `<strong>⚠️ ${localPhotos} photo(s) still stored locally</strong> (using ${Math.round(localPhotos * 30)} KB est.)`;
+    html += `<br><button onclick="migrateExistingPhotos().then(()=>manageStorage())" style="margin-top:6px;padding:6px 14px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:4px;font-size:13px;cursor:pointer;">Migrate to Cloud Now</button>`;
+    html += `</div>`;
+  } else if (migrationProgress.complete) {
+    html += `<p style="color:var(--accent);">✅ All photos migrated to cloud storage.</p>`;
+  }
 
   if (dayStats.length === 0) {
-    html += '<p>No photos stored. Storage is being used by text data only.</p>';
+    html += '<p>No photos stored.</p>';
   } else {
     html += '<table style="width:100%;border-collapse:collapse;margin-top:12px;">';
-    html += '<tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:6px;">Day</th><th style="text-align:left;padding:6px;">Date</th><th style="text-align:right;padding:6px;">Photos</th><th style="text-align:right;padding:6px;">Size</th><th style="padding:6px;"></th></tr>';
+    html += '<tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:6px;">Day</th><th style="text-align:left;padding:6px;">Date</th><th style="text-align:right;padding:6px;">☁️</th><th style="text-align:right;padding:6px;">📱</th><th style="text-align:right;padding:6px;">Size</th></tr>';
     dayStats.forEach(s => {
       const kb = Math.round(s.photoBytes / 1024);
       html += `<tr style="border-bottom:1px solid var(--border);">`;
       html += `<td style="padding:6px;">Day ${s.dayIdx + 1}</td>`;
       html += `<td style="padding:6px;">${s.date}</td>`;
-      html += `<td style="text-align:right;padding:6px;">${s.photos}</td>`;
+      html += `<td style="text-align:right;padding:6px;">${s.cloud}</td>`;
+      html += `<td style="text-align:right;padding:6px;">${s.local}</td>`;
       html += `<td style="text-align:right;padding:6px;">${kb} KB</td>`;
-      html += `<td style="padding:6px;"><button onclick="clearPhotosForDay(${s.dayIdx})" style="padding:4px 10px;border:1px solid var(--danger);background:#fff;color:var(--danger);border-radius:4px;font-size:12px;cursor:pointer;">Delete Photos</button></td>`;
       html += `</tr>`;
     });
     html += '</table>';
-    if (totalPhotos > 0) {
-      html += `<div style="margin-top:16px;"><button onclick="clearAllPhotos()" style="padding:8px 16px;border:1px solid var(--danger);background:var(--danger);color:#fff;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">Delete ALL Photos (${totalPhotos})</button></div>`;
-    }
   }
 
   html += '<div style="margin-top:16px;"><button onclick="closeReport()" style="padding:8px 16px;border:1px solid var(--border);background:var(--bg);border-radius:6px;font-size:14px;cursor:pointer;">Close</button></div>';
@@ -2138,13 +2402,19 @@ function clearPhotosForDay(dayIdx) {
     (data[field] || []).forEach(entry => {
       if (entry.photos && entry.photos.length) {
         removed += entry.photos.length;
+        // Delete from Firebase Storage if applicable
+        entry.photos.forEach(p => {
+          if (isStorageURL(p)) {
+            try { storage.refFromURL(p).delete().catch(() => {}); } catch(e) {}
+          }
+        });
         entry.photos = [];
       }
     });
   });
   saveDay(dayIdx, data);
   alert('Removed ' + removed + ' photo(s) from Day ' + (dayIdx + 1) + '.');
-  manageStorage(); // refresh the view
+  manageStorage();
 }
 
 function clearAllPhotos() {
@@ -2160,6 +2430,11 @@ function clearAllPhotos() {
       (data[field] || []).forEach(entry => {
         if (entry.photos && entry.photos.length) {
           totalRemoved += entry.photos.length;
+          entry.photos.forEach(p => {
+            if (isStorageURL(p)) {
+              try { storage.refFromURL(p).delete().catch(() => {}); } catch(e) {}
+            }
+          });
           entry.photos = [];
           changed = true;
         }
@@ -2168,7 +2443,7 @@ function clearAllPhotos() {
     if (changed) saveDay(i, data);
   }
   alert('Removed ' + totalRemoved + ' photo(s) from all days.');
-  manageStorage(); // refresh
+  manageStorage();
 }
 
 function exportData() {
@@ -2311,7 +2586,7 @@ function generateVetReport() {
     if (data.bms.length) {
       html += `<table><tr><th>Time</th><th>Consistency</th><th>Color</th><th>Blood</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
       data.bms.forEach((bm, bi) => {
-        const photos = (bm.photos && bm.photos.length) ? bm.photos.map(p => `<img src="${esc(p)}" alt="BM #${bi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        const photos = (bm.photos && bm.photos.length) ? bm.photos.map(p => `<img src="${photoSrc(p)}" alt="BM #${bi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
         html += `<tr><td>${bm.time || '--'}</td><td>${bm.consistency ? bm.consistency + '/7' : '--'}</td><td>${bm.color || '--'}</td><td>${bm.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(bm.loggedBy || '')}</td><td>${esc(bm.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
@@ -2340,7 +2615,7 @@ function generateVetReport() {
     if (data.vomits && data.vomits.length) {
       html += `<table><tr><th>Time</th><th>Amount</th><th>Contents</th><th>Blood</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
       data.vomits.forEach((v, vi) => {
-        const photos = (v.photos && v.photos.length) ? v.photos.map(p => `<img src="${esc(p)}" alt="Vomit #${vi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        const photos = (v.photos && v.photos.length) ? v.photos.map(p => `<img src="${photoSrc(p)}" alt="Vomit #${vi+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
         html += `<tr><td>${v.time || '--'}</td><td>${v.amount || '--'}</td><td>${v.contents || '--'}</td><td>${v.blood === 'yes' ? '<strong>YES</strong>' : 'No'}</td><td>${esc(v.loggedBy || '')}</td><td>${esc(v.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
@@ -2350,7 +2625,7 @@ function generateVetReport() {
     if (data.urinations && data.urinations.length) {
       html += `<table><tr><th>Time</th><th>Amount</th><th>Color</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
       data.urinations.forEach((u, ui) => {
-        const photos = (u.photos && u.photos.length) ? u.photos.map(p => `<img src="${esc(p)}" alt="Urine #${ui+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        const photos = (u.photos && u.photos.length) ? u.photos.map(p => `<img src="${photoSrc(p)}" alt="Urine #${ui+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
         html += `<tr><td>${u.time || '--'}</td><td>${u.amount || '--'}</td><td>${u.color || '--'}</td><td>${esc(u.loggedBy || '')}</td><td>${esc(u.notes)}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
@@ -2361,7 +2636,7 @@ function generateVetReport() {
     if (symsReport.length) {
       html += `<table><tr><th>Time</th><th>Energy</th><th>Appetite</th><th>Pain</th><th>Water</th><th>By</th><th>Notes</th><th>Photos</th></tr>`;
       symsReport.forEach((obs, si) => {
-        const photos = (obs.photos && obs.photos.length) ? obs.photos.map(p => `<img src="${esc(p)}" alt="Obs #${si+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
+        const photos = (obs.photos && obs.photos.length) ? obs.photos.map(p => `<img src="${photoSrc(p)}" alt="Obs #${si+1}" style="width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #ddd;margin:2px;">`).join('') : '';
         html += `<tr><td>${obs.time || '--'}</td><td>${obs.energy || '--'}/5</td><td>${obs.appetite || '--'}</td><td>${obs.pain || 'None'}</td><td>${obs.water || '--'}</td><td>${esc(obs.loggedBy || '')}</td><td>${esc(obs.notes || '')}</td><td>${photos}</td></tr>`;
       });
       html += `</table>`;
