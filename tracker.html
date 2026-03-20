@@ -553,6 +553,7 @@
 <div class="actions">
   <button class="btn btn-danger" onclick="clearDay()">Clear Today's Data</button>
   <button class="btn" onclick="inspectDayData()">Inspect Day Data</button>
+  <button class="btn" onclick="manageStorage()">Manage Photos / Storage</button>
   <button class="btn" onclick="exportData()">Export JSON</button>
   <button class="btn btn-primary" onclick="generateVetReport()">Generate Vet Report</button>
 </div>
@@ -671,7 +672,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -2058,6 +2059,116 @@ function inspectDayData() {
   info += '  Vomits: ' + (data.vomits || []).length + '\n';
   info += '  Symptoms: ' + (data.symptoms || []).length + '\n';
   alert(info);
+}
+
+function manageStorage() {
+  // Calculate storage usage
+  let totalBytes = 0;
+  let totalPhotos = 0;
+  const dayStats = [];
+
+  for (let i = 0; i < DAYS; i++) {
+    const key = getKey(i);
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    const data = JSON.parse(raw);
+    const dayBytes = raw.length * 2; // JS strings are UTF-16
+    let photos = 0;
+    let photoBytes = 0;
+
+    ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
+      (data[field] || []).forEach(entry => {
+        if (entry.photos && entry.photos.length) {
+          photos += entry.photos.length;
+          entry.photos.forEach(p => { photoBytes += (p.length || 0) * 2; });
+        }
+      });
+    });
+
+    totalBytes += dayBytes;
+    totalPhotos += photos;
+    if (photos > 0) {
+      dayStats.push({ dayIdx: i, date: formatDate(getDayDate(i)), photos, photoBytes });
+    }
+  }
+
+  const usedKB = Math.round(totalBytes / 1024);
+  const maxKB = 5120; // ~5MB localStorage limit
+  const pct = Math.round((usedKB / maxKB) * 100);
+
+  let html = '<h2>Storage Manager</h2>';
+  html += `<p><strong>Storage used:</strong> ${usedKB} KB / ~${maxKB} KB (${pct}%)</p>`;
+  html += `<div style="background:#eee;border-radius:6px;height:20px;margin:8px 0;overflow:hidden;">`;
+  html += `<div style="background:${pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warning)' : 'var(--accent)'};height:100%;width:${Math.min(pct,100)}%;border-radius:6px;"></div></div>`;
+  html += `<p><strong>Total photos:</strong> ${totalPhotos}</p>`;
+
+  if (dayStats.length === 0) {
+    html += '<p>No photos stored. Storage is being used by text data only.</p>';
+  } else {
+    html += '<table style="width:100%;border-collapse:collapse;margin-top:12px;">';
+    html += '<tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:6px;">Day</th><th style="text-align:left;padding:6px;">Date</th><th style="text-align:right;padding:6px;">Photos</th><th style="text-align:right;padding:6px;">Size</th><th style="padding:6px;"></th></tr>';
+    dayStats.forEach(s => {
+      const kb = Math.round(s.photoBytes / 1024);
+      html += `<tr style="border-bottom:1px solid var(--border);">`;
+      html += `<td style="padding:6px;">Day ${s.dayIdx + 1}</td>`;
+      html += `<td style="padding:6px;">${s.date}</td>`;
+      html += `<td style="text-align:right;padding:6px;">${s.photos}</td>`;
+      html += `<td style="text-align:right;padding:6px;">${kb} KB</td>`;
+      html += `<td style="padding:6px;"><button onclick="clearPhotosForDay(${s.dayIdx})" style="padding:4px 10px;border:1px solid var(--danger);background:#fff;color:var(--danger);border-radius:4px;font-size:12px;cursor:pointer;">Delete Photos</button></td>`;
+      html += `</tr>`;
+    });
+    html += '</table>';
+    if (totalPhotos > 0) {
+      html += `<div style="margin-top:16px;"><button onclick="clearAllPhotos()" style="padding:8px 16px;border:1px solid var(--danger);background:var(--danger);color:#fff;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">Delete ALL Photos (${totalPhotos})</button></div>`;
+    }
+  }
+
+  html += '<div style="margin-top:16px;"><button onclick="closeReport()" style="padding:8px 16px;border:1px solid var(--border);background:var(--bg);border-radius:6px;font-size:14px;cursor:pointer;">Close</button></div>';
+
+  document.getElementById('reportContent').innerHTML = html;
+  document.getElementById('reportOverlay').style.display = 'block';
+}
+
+function clearPhotosForDay(dayIdx) {
+  const date = formatDate(getDayDate(dayIdx));
+  if (!confirm('Delete all photos for Day ' + (dayIdx + 1) + ' (' + date + ')? This cannot be undone.')) return;
+  const data = loadDay(dayIdx);
+  let removed = 0;
+  ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
+    (data[field] || []).forEach(entry => {
+      if (entry.photos && entry.photos.length) {
+        removed += entry.photos.length;
+        entry.photos = [];
+      }
+    });
+  });
+  saveDay(dayIdx, data);
+  alert('Removed ' + removed + ' photo(s) from Day ' + (dayIdx + 1) + '.');
+  manageStorage(); // refresh the view
+}
+
+function clearAllPhotos() {
+  if (!confirm('Delete ALL photos from ALL days? This cannot be undone. Your text data (meds, BMs, meals, etc.) will NOT be affected.')) return;
+  let totalRemoved = 0;
+  for (let i = 0; i < DAYS; i++) {
+    const key = getKey(i);
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    const data = JSON.parse(raw);
+    let changed = false;
+    ['bms', 'meals', 'urinations', 'vomits', 'symptoms'].forEach(field => {
+      (data[field] || []).forEach(entry => {
+        if (entry.photos && entry.photos.length) {
+          totalRemoved += entry.photos.length;
+          entry.photos = [];
+          changed = true;
+        }
+      });
+    });
+    if (changed) saveDay(i, data);
+  }
+  alert('Removed ' + totalRemoved + ' photo(s) from all days.');
+  manageStorage(); // refresh
 }
 
 function exportData() {
