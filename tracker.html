@@ -685,7 +685,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -1898,11 +1898,25 @@ function getEntryForType(data, type, entryIdx) {
 
 // Check if a photo value is a Firebase Storage URL (not base64)
 function isStorageURL(val) {
-  return val && (val.startsWith('https://firebasestorage.googleapis.com') || val.startsWith('https://storage.googleapis.com'));
+  if (!val || typeof val !== 'string') return false;
+  try {
+    const url = new URL(val);
+    return url.protocol === 'https:' &&
+      (url.hostname === 'firebasestorage.googleapis.com' || url.hostname === 'storage.googleapis.com');
+  } catch(e) { return false; }
 }
 
 // Upload a base64 photo to Firebase Storage, return the download URL
+const ALLOWED_PHOTO_TYPES = ['bm', 'urine', 'vomit', 'symptom', 'meal'];
+
 async function uploadPhotoToStorage(base64Data, dayIdx, type, entryIdx, photoIdx) {
+  // Validate input
+  if (!base64Data || !base64Data.startsWith('data:image/')) {
+    throw new Error('Invalid photo data — not a data URI');
+  }
+  if (!ALLOWED_PHOTO_TYPES.includes(type)) {
+    throw new Error('Invalid photo type: ' + type);
+  }
   if (!storage || !firebaseReady) {
     queueOfflineUpload(base64Data, dayIdx, type, entryIdx, photoIdx);
     return base64Data; // Return base64 as fallback
@@ -1913,8 +1927,13 @@ async function uploadPhotoToStorage(base64Data, dayIdx, type, entryIdx, photoIdx
   const ref = storage.ref(path);
 
   // Convert base64 to blob
-  const response = await fetch(base64Data);
-  const blob = await response.blob();
+  let blob;
+  try {
+    const response = await fetch(base64Data);
+    blob = await response.blob();
+  } catch(e) {
+    throw new Error('Failed to convert photo data: ' + e.message);
+  }
 
   const snapshot = await ref.put(blob, { contentType: 'image/jpeg' });
   return await snapshot.ref.getDownloadURL();
@@ -2035,6 +2054,7 @@ async function migrateExistingPhotos() {
     const data = loadDay(d);
     let dayChanged = false;
 
+    let dayHasFailures = false;
     for (const field of fields) {
       for (let ei = 0; ei < (data[field] || []).length; ei++) {
         const entry = data[field][ei];
@@ -2051,6 +2071,7 @@ async function migrateExistingPhotos() {
             }
           } catch(err) {
             console.warn('Migration failed for day ' + d + ' ' + field + '[' + ei + '] photo ' + pi + ':', err);
+            dayHasFailures = true;
           }
         }
       }
@@ -2059,12 +2080,19 @@ async function migrateExistingPhotos() {
     if (dayChanged) {
       saveDay(d, data);
     }
-    progress[dayKey] = 'done';
+    // Only mark day done if ALL photos migrated successfully
+    if (!dayHasFailures) {
+      progress[dayKey] = 'done';
+    }
     localStorage.setItem(MIGRATION_KEY, JSON.stringify(progress));
   }
 
-  progress.complete = true;
-  localStorage.setItem(MIGRATION_KEY, JSON.stringify(progress));
+  // Only mark complete if all days are done
+  const allDone = Array.from({ length: DAYS }, (_, i) => 'day_' + i).every(k => progress[k] === 'done');
+  if (allDone) {
+    progress.complete = true;
+    localStorage.setItem(MIGRATION_KEY, JSON.stringify(progress));
+  }
   migrationRunning = false;
   hideMigrationUI();
   render();
@@ -2132,7 +2160,8 @@ function addPhoto(dayIdx, type, entryIdx, input) {
           }
         })
         .catch(err => {
-          console.warn('Photo upload failed, queued for retry:', err.message);
+          console.warn('Photo upload failed, queuing for retry:', err.message);
+          queueOfflineUpload(compressed, dayIdx, type, entryIdx, photoIndex);
         });
     };
     img.src = e.target.result;
