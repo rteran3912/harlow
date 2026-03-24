@@ -1,4 +1,4 @@
-const CACHE_NAME = 'harlow-tracker-v13';
+const CACHE_NAME = 'harlow-tracker-v14';
 const URLS_TO_CACHE = [
   '/harlow/tracker.html',
   '/harlow/manifest.json'

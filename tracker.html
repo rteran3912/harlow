@@ -685,7 +685,7 @@ function updateSyncStatus() {
 setTimeout(updateSyncStatus, 2000);
 setInterval(updateSyncStatus, 5000);
 
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 function testSync() {
   const box = document.getElementById('syncTestResult');
   box.style.display = 'block';
@@ -766,6 +766,7 @@ const EVERY_OTHER_NIGHT_EYE_MEDS = [
 ];
 
 const PRN_MEDS = [
+  { time: 'PRN', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: 'Weaning — ad-hoc as needed', type: 'injection' },
   { time: 'PRN', name: 'Cerenia (Maropitant)', dose: '1 tab (16mg)', note: 'Only if vomiting — max 1x/24hrs', type: 'prn' },
   { time: 'PRN', name: 'Ondansetron', dose: '1/2 tab (2mg)', note: 'Only if nauseous — max every 8hrs', type: 'prn' },
   { time: 'PRN', name: 'Sub-Q Fluids (LRS)', dose: '100 mL subcutaneous', note: 'If dehydrated — max every other day', type: 'injection' },
@@ -913,13 +914,7 @@ function getMedsForDay(dayIdx) {
   if (EVERY_OTHER_NIGHT_EYE_DAYS.includes(dayIdx)) {
     meds.push(...EVERY_OTHER_NIGHT_EYE_MEDS);
   }
-  if (dexDays.includes(dayIdx)) {
-    // Find active frequency for this day
-    const schedule = getDexSchedule();
-    let freq = 2;
-    for (const s of schedule) { if (dayIdx >= s.fromDay) freq = s.freq; }
-    meds.push({ time: 'ANY', name: 'Dex SP Injection', dose: '0.2 mL subcutaneous', note: `Every ${freq} days`, type: 'injection' });
-  }
+  // Dex SP is now ad-hoc (PRN) — no longer schedule-driven
   if (B12_DAYS.includes(dayIdx)) {
     meds.push({ time: 'ANY', name: 'B-12 Injection', dose: '0.4 mL subcutaneous', note: 'Weekly', type: 'injection' });
   }
